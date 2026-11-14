@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class PrecorderRecordingManager {
+
     private final ArrayBlockingQueue<PrecorderCapture.CapturedFrame> frames =
             new ArrayBlockingQueue<>(2);
 
@@ -25,11 +26,16 @@ public final class PrecorderRecordingManager {
     public synchronized void start(PrecorderConfig config)
             throws IOException {
 
+        if (config == null) {
+            throw new IllegalArgumentException("Config is required");
+        }
+
         if (active || (worker != null && worker.isAlive())) {
             throw new IllegalStateException("Recorder is busy");
         }
 
-        fps = config.fps;
+        fps = Math.max(1, config.fps);
+
         output = new File(
                 "precorder",
                 "PRECORDER_" + System.currentTimeMillis() + ".mov"
@@ -53,7 +59,7 @@ public final class PrecorderRecordingManager {
         }
 
         long now = System.nanoTime();
-        long interval = 1_000_000_000L / Math.max(1, fps);
+        long interval = 1_000_000_000L / fps;
 
         if (now - lastCaptureTime < interval) {
             return false;
@@ -64,10 +70,13 @@ public final class PrecorderRecordingManager {
     }
 
     public void submit(PrecorderCapture.CapturedFrame frame) {
-        if (frame != null && active && !paused
-                && !stopRequested.get()) {
-            frames.offer(frame);
+        if (frame == null || !active || paused
+                || stopRequested.get()) {
+            return;
         }
+
+        // Never block the game/render thread.
+        frames.offer(frame);
     }
 
     public void setPaused(boolean value) {
@@ -132,4 +141,4 @@ public final class PrecorderRecordingManager {
     public String getError() {
         return error;
     }
-            }
+}
