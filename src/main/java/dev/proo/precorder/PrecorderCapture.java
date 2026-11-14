@@ -60,4 +60,3 @@ public final class PrecorderCapture {
             throw exception;
         }
     }
-            }
