@@ -39,6 +39,20 @@ public final class PrecorderVideoEncoder {
         this.encoder = SequenceEncoder.createSequenceEncoder(output, fps);
     }
 
+    public void addFrame(PrecorderCapture.CapturedFrame frame)
+            throws IOException {
+
+        if (frame == null) {
+            throw new IllegalArgumentException("Frame is required");
+        }
+
+        if (frame.width() != width || frame.height() != height) {
+            throw new IllegalArgumentException("Frame dimensions changed");
+        }
+
+        addFrame(frame.rgba());
+    }
+
     public void addFrame(byte[] rgba) throws IOException {
         if (encoder == null) {
             throw new IllegalStateException("Encoder not started");
