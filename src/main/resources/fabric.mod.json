@@ -3,7 +3,7 @@
   "id": "precorder",
   "version": "${version}",
   "name": "P-Recorder",
-  "icon": "assets/precorder/icon.png"
+  "icon": "assets/precorder/icon.png",
   "description": "A lightweight client-side recording mod for Minecraft Java.",
   "authors": ["PRoo"],
   "environment": "client",
