@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "precorder",
+  "version": "${version}",
+  "name": "P-Recorder",
+  "icon": "assets/precorder/icon.png"
+  "description": "A lightweight client-side recording mod for Minecraft Java.",
+  "authors": ["PRoo"],
+  "environment": "client",
+  "entrypoints": {
+    "client": ["dev.proo.precorder.PrecorderClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.0",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
