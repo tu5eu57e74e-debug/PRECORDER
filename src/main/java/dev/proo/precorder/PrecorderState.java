@@ -1,12 +1,10 @@
+
 package dev.proo.precorder;
 
-/**
- * Tracks the requested recorder state.
- * This does not capture video until a capture backend is connected.
- */
 public final class PrecorderState {
     private static boolean recording = false;
     private static boolean paused = false;
+    private static String status = "Ready";
 
     private PrecorderState() {}
 
@@ -18,22 +16,48 @@ public final class PrecorderState {
         return paused;
     }
 
+    public static String getStatus() {
+        return status;
+    }
+
     public static void start() {
         recording = true;
         paused = false;
+        status = "Recording";
     }
 
     public static void stop() {
         recording = false;
         paused = false;
+        status = "Ready";
+    }
+
+    public static void pause() {
+        if (recording) {
+            paused = true;
+            status = "Paused";
+        }
+    }
+
+    public static void resume() {
+        if (recording) {
+            paused = false;
+            status = "Recording";
+        }
     }
 
     public static void toggleRecording() {
-        if (recording) stop();
-        else start();
+        if (recording) {
+            stop();
+        } else {
+            start();
+        }
     }
 
     public static void togglePause() {
-        if (recording) paused = !paused;
+        if (recording) {
+            if (paused) resume();
+            else pause();
+        }
     }
 }
