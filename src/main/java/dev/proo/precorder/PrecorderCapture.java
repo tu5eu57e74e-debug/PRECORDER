@@ -14,9 +14,11 @@ import java.util.function.Consumer;
 public final class PrecorderCapture {
     private PrecorderCapture() {}
 
+    public record CapturedFrame(int width, int height, byte[] rgba) {}
+
     public static void captureFrame(
             MinecraftClient client,
-            Consumer<byte[]> onCaptured
+            Consumer<CapturedFrame> onCaptured
     ) {
         RenderSystem.assertOnRenderThread();
 
@@ -60,7 +62,9 @@ public final class PrecorderCapture {
                                 byte[] pixels = new byte[data.remaining()];
                                 data.get(pixels);
 
-                                onCaptured.accept(pixels);
+                                onCaptured.accept(
+                                        new CapturedFrame(width, height, pixels)
+                                );
                             }
                         } finally {
                             buffer.close();
