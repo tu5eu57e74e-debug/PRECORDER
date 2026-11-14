@@ -14,6 +14,48 @@ public final class PrecorderClient implements ClientModInitializer {
 
     private static String lastErrorShown;
 
+    public static boolean toggleRecording() {
+        MinecraftClient client = MinecraftClient.getInstance();
+
+        if (RECORDER.isRecording()) {
+            RECORDER.stop();
+            PrecorderState.stop();
+            message(client, "Stopping recording...");
+            return true;
+        }
+
+        try {
+            RECORDER.start(PrecorderConfig.load());
+            PrecorderState.start();
+            message(client, "Recording started");
+            return true;
+        } catch (Exception exception) {
+            message(client, "Could not start: " + exception.getMessage());
+            return false;
+        }
+    }
+
+    public static boolean togglePause() {
+        MinecraftClient client = MinecraftClient.getInstance();
+
+        if (!RECORDER.isRecording()) {
+            message(client, "Start recording first");
+            return false;
+        }
+
+        boolean pause = !RECORDER.isPaused();
+        RECORDER.setPaused(pause);
+
+        if (pause) {
+            PrecorderState.pause();
+        } else {
+            PrecorderState.resume();
+        }
+
+        message(client, pause ? "Paused" : "Recording");
+        return true;
+    }
+
     @Override
     public void onInitializeClient() {
         PrecorderKeybinds.register();
@@ -25,44 +67,18 @@ public final class PrecorderClient implements ClientModInitializer {
             }
 
             while (PrecorderKeybinds.toggleRecording.wasPressed()) {
-                if (RECORDER.isRecording()) {
-                    RECORDER.stop();
-                    PrecorderState.stop();
-                    message(client, "Stopping recording...");
-                } else {
-                    try {
-                        RECORDER.start(PrecorderConfig.load());
-                        PrecorderState.start();
-                        message(client, "Recording started");
-                    } catch (Exception exception) {
-                        message(client, "Could not start: "
-                                + exception.getMessage());
-                    }
-                }
+                toggleRecording();
             }
 
             while (PrecorderKeybinds.pauseRecording.wasPressed()) {
-                if (!RECORDER.isRecording()) {
-                    message(client, "Start recording first");
-                    continue;
-                }
-
-                boolean pause = !RECORDER.isPaused();
-                RECORDER.setPaused(pause);
-
-                if (pause) {
-                    PrecorderState.pause();
-                } else {
-                    PrecorderState.resume();
-                }
-
-                message(client, pause ? "Paused" : "Recording");
+                togglePause();
             }
 
             String error = RECORDER.getError();
 
             if (error != null && !error.equals(lastErrorShown)) {
                 lastErrorShown = error;
+                PrecorderState.stop();
                 message(client, "Recording error: " + error);
             }
         });
@@ -74,10 +90,7 @@ public final class PrecorderClient implements ClientModInitializer {
                 return;
             }
 
-            PrecorderCapture.captureFrame(
-                    client,
-                    RECORDER::submit
-            );
+            PrecorderCapture.captureFrame(client, RECORDER::submit);
         });
     }
 
