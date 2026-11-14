@@ -15,16 +15,23 @@ public final class PrecorderVideoEncoder {
 
     public void start(File output, int width, int height, int fps)
             throws IOException {
+
         if (encoder != null) {
             throw new IllegalStateException("Encoder already started");
         }
-        if (width <= 0 || height <= 0 || fps <= 0) {
-            throw new IllegalArgumentException("Invalid video settings");
+
+        if (output == null || width <= 0 || height <= 0 || fps <= 0) {
+            throw new IllegalArgumentException("Invalid encoder settings");
+        }
+
+        if ((width & 1) != 0 || (height & 1) != 0) {
+            throw new IllegalArgumentException("Video dimensions must be even");
         }
 
         File parent = output.getAbsoluteFile().getParentFile();
-        if (parent != null) {
-            parent.mkdirs();
+
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            throw new IOException("Could not create output directory");
         }
 
         this.width = width;
@@ -36,23 +43,27 @@ public final class PrecorderVideoEncoder {
         if (encoder == null) {
             throw new IllegalStateException("Encoder not started");
         }
-        if (rgba == null || rgba.length != width * height * 4) {
+
+        if (rgba == null || rgba.length != (long) width * height * 4L) {
             throw new IllegalArgumentException("Invalid RGBA frame");
         }
 
         Picture picture = Picture.create(width, height, ColorSpace.RGB);
-        byte[] rgb = picture.getPlaneData(0);
+
+        byte[] red = picture.getPlaneData(0);
+        byte[] green = picture.getPlaneData(1);
+        byte[] blue = picture.getPlaneData(2);
 
         for (int y = 0; y < height; y++) {
             int sourceY = height - 1 - y;
 
             for (int x = 0; x < width; x++) {
                 int src = (sourceY * width + x) * 4;
-                int dst = (y * width + x) * 3;
+                int dst = y * width + x;
 
-                rgb[dst]     = (byte) ((rgba[src] & 255) - 128);
-                rgb[dst + 1] = (byte) ((rgba[src + 1] & 255) - 128);
-                rgb[dst + 2] = (byte) ((rgba[src + 2] & 255) - 128);
+                red[dst] = (byte) ((rgba[src] & 255) - 128);
+                green[dst] = (byte) ((rgba[src + 1] & 255) - 128);
+                blue[dst] = (byte) ((rgba[src + 2] & 255) - 128);
             }
         }
 
@@ -60,7 +71,9 @@ public final class PrecorderVideoEncoder {
     }
 
     public void stop() throws IOException {
-        if (encoder == null) return;
+        if (encoder == null) {
+            return;
+        }
 
         SequenceEncoder current = encoder;
         encoder = null;
