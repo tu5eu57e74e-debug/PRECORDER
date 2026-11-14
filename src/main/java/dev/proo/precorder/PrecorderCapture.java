@@ -20,15 +20,24 @@ public final class PrecorderCapture {
     ) {
         RenderSystem.assertOnRenderThread();
 
+        if (client == null || onCaptured == null) {
+            throw new IllegalArgumentException("Client and callback are required");
+        }
+
         Framebuffer framebuffer = client.getFramebuffer();
         GpuTexture texture = framebuffer.getColorAttachment();
 
         if (texture == null) {
-            throw new IllegalStateException("No framebuffer texture");
+            throw new IllegalStateException("Framebuffer color texture is missing");
         }
 
         int width = framebuffer.textureWidth;
         int height = framebuffer.textureHeight;
+
+        if (width <= 0 || height <= 0) {
+            throw new IllegalStateException("Invalid framebuffer dimensions");
+        }
+
         long size = (long) width * height * 4L;
 
         GpuBuffer buffer = RenderSystem.getDevice().createBuffer(
@@ -38,7 +47,8 @@ public final class PrecorderCapture {
         );
 
         try {
-            RenderSystem.getDevice().createCommandEncoder()
+            RenderSystem.getDevice()
+                    .createCommandEncoder()
                     .copyTextureToBuffer(texture, buffer, 0L, () -> {
                         try {
                             var encoder = RenderSystem.getDevice()
@@ -49,6 +59,7 @@ public final class PrecorderCapture {
                                 ByteBuffer data = mapped.data();
                                 byte[] pixels = new byte[data.remaining()];
                                 data.get(pixels);
+
                                 onCaptured.accept(pixels);
                             }
                         } finally {
