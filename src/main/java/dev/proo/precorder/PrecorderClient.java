@@ -1,3 +1,4 @@
+
 package dev.proo.precorder;
 
 import net.fabricmc.api.ClientModInitializer;
@@ -16,23 +17,33 @@ public final class PrecorderClient implements ClientModInitializer {
 
             while (PrecorderKeybinds.toggleRecording.wasPressed()) {
                 PrecorderState.toggleRecording();
+
                 if (client.player != null) {
-                    client.player.sendMessage(Text.literal(
-                            PrecorderState.isRecording()
-                                    ? "Precorder: recording state ON (capture backend not connected)"
-                                    : "Precorder: recording state OFF"
-                    ), false);
+                    client.player.sendMessage(
+                            Text.literal("PRECORDER: " + PrecorderState.getStatus()),
+                            false
+                    );
                 }
             }
 
             while (PrecorderKeybinds.pauseRecording.wasPressed()) {
+                if (!PrecorderState.isRecording()) {
+                    if (client.player != null) {
+                        client.player.sendMessage(
+                                Text.literal("PRECORDER: Start recording first"),
+                                false
+                        );
+                    }
+                    continue;
+                }
+
                 PrecorderState.togglePause();
+
                 if (client.player != null) {
-                    client.player.sendMessage(Text.literal(
-                            !PrecorderState.isRecording()
-                                    ? "Precorder: start first"
-                                    : PrecorderState.isPaused() ? "Precorder: paused" : "Precorder: resumed"
-                    ), false);
+                    client.player.sendMessage(
+                            Text.literal("PRECORDER: " + PrecorderState.getStatus()),
+                            false
+                    );
                 }
             }
         });
