@@ -29,25 +29,13 @@ jobs:
         with:
           gradle-version: '9.2.1'
 
-      - name: Extract ZIP
-        run: |
-          mkdir project
-          unzip -q PRECORDER-project-scaffold.zip -d project
-
       - name: Build PRECORDER
-        run: |
-          BUILD_FILE=$(find project -name build.gradle -print -quit)
-          if [ -z "$BUILD_FILE" ]; then
-            echo "build.gradle not found"
-            exit 1
-          fi
-          cd "$(dirname "$BUILD_FILE")"
-          gradle build
+        run: gradle build --no-daemon
 
       - name: Upload JAR
         uses: actions/upload-artifact@v4
         with:
           name: PRECORDER-build
-          path: project/**/build/libs/*.jar
+          path: build/libs/*.jar
           if-no-files-found: error
           
