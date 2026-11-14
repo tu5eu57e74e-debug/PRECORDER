@@ -1,9 +1,11 @@
+
 name: Build PRECORDER
 
 on:
   workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -11,22 +13,41 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Set up Java 21
+
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-      - name: Set up Gradle
+
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-      - name: Build mod
-        run: gradle build
+        with:
+          gradle-version: '8.14'
+
+      - name: Extract ZIP
+        run: |
+          mkdir project
+          unzip -q PRECORDER-project-scaffold.zip -d project
+
+      - name: Build PRECORDER
+        run: |
+          BUILD_FILE=$(find project -name build.gradle -print -quit)
+          if [ -z "$BUILD_FILE" ]; then
+            echo "build.gradle not found"
+            exit 1
+          fi
+          cd "$(dirname "$BUILD_FILE")"
+          gradle build
+
       - name: Upload JAR
         uses: actions/upload-artifact@v4
         with:
           name: PRECORDER-build
-          path: build/libs/*.jar
+          path: project/**/build/libs/*.jar
           if-no-files-found: error
           
