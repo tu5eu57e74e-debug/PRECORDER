@@ -114,11 +114,10 @@ public final class PrecorderScreen extends Screen {
 
         super.render(context, mouseX, mouseY, delta);
     }
-
     @Override
     public void close() {
         if (this.client != null) {
             this.client.setScreen(this.parent);
         }
     }
-    }
+}
