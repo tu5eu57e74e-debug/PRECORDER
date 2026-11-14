@@ -1,100 +1,135 @@
 
 package dev.proo.precorder;
 
-import org.jcodec.api.SequenceEncoder;
-import org.jcodec.common.model.ColorSpace;
-import org.jcodec.common.model.Picture;
-
 import java.io.File;
 import java.io.IOException;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-public final class PrecorderVideoEncoder {
-    private SequenceEncoder encoder;
-    private int width;
-    private int height;
+public final class PrecorderRecordingManager {
+    private final ArrayBlockingQueue<PrecorderCapture.CapturedFrame> frames =
+            new ArrayBlockingQueue<>(2);
 
-    public void start(File output, int width, int height, int fps)
+    private final AtomicBoolean stopRequested = new AtomicBoolean(false);
+
+    private volatile boolean active;
+    private volatile boolean paused;
+    private volatile String error;
+
+    private int fps;
+    private File output;
+    private Thread worker;
+    private long lastCaptureTime;
+
+    public synchronized void start(PrecorderConfig config)
             throws IOException {
 
-        if (encoder != null) {
-            throw new IllegalStateException("Encoder already started");
+        if (active || (worker != null && worker.isAlive())) {
+            throw new IllegalStateException("Recorder is busy");
         }
 
-        if (output == null || width <= 0 || height <= 0 || fps <= 0) {
-            throw new IllegalArgumentException("Invalid encoder settings");
-        }
+        fps = config.fps;
+        output = new File(
+                "precorder",
+                "PRECORDER_" + System.currentTimeMillis() + ".mov"
+        ).getAbsoluteFile();
 
-        if ((width & 1) != 0 || (height & 1) != 0) {
-            throw new IllegalArgumentException("Video dimensions must be even");
-        }
+        frames.clear();
+        stopRequested.set(false);
+        paused = false;
+        error = null;
+        lastCaptureTime = 0;
+        active = true;
 
-        File parent = output.getAbsoluteFile().getParentFile();
-
-        if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            throw new IOException("Could not create output directory");
-        }
-
-        this.width = width;
-        this.height = height;
-        this.encoder = SequenceEncoder.createSequenceEncoder(output, fps);
+        worker = new Thread(this::encodeLoop, "PRECORDER-Encoder");
+        worker.setDaemon(true);
+        worker.start();
     }
 
-    public void addFrame(PrecorderCapture.CapturedFrame frame)
-            throws IOException {
-
-        if (frame == null) {
-            throw new IllegalArgumentException("Frame is required");
+    public boolean shouldCapture() {
+        if (!active || paused || stopRequested.get()) {
+            return false;
         }
 
-        if (frame.width() != width || frame.height() != height) {
-            throw new IllegalArgumentException("Frame dimensions changed");
+        long now = System.nanoTime();
+        long interval = 1_000_000_000L / Math.max(1, fps);
+
+        if (now - lastCaptureTime < interval) {
+            return false;
         }
 
-        addFrame(frame.rgba());
+        lastCaptureTime = now;
+        return true;
     }
 
-    public void addFrame(byte[] rgba) throws IOException {
-        if (encoder == null) {
-            throw new IllegalStateException("Encoder not started");
+    public void submit(PrecorderCapture.CapturedFrame frame) {
+        if (frame != null && active && !paused
+                && !stopRequested.get()) {
+            frames.offer(frame);
         }
+    }
 
-        if (rgba == null || rgba.length != (long) width * height * 4L) {
-            throw new IllegalArgumentException("Invalid RGBA frame");
+    public void setPaused(boolean value) {
+        paused = value;
+    }
+
+    public synchronized void stop() {
+        if (active) {
+            active = false;
+            stopRequested.set(true);
         }
+    }
 
-        Picture picture = Picture.create(width, height, ColorSpace.RGB);
+    private void encodeLoop() {
+        PrecorderVideoEncoder encoder = new PrecorderVideoEncoder();
 
-        byte[] red = picture.getPlaneData(0);
-        byte[] green = picture.getPlaneData(1);
-        byte[] blue = picture.getPlaneData(2);
+        try {
+            while (!stopRequested.get() || !frames.isEmpty()) {
+                PrecorderCapture.CapturedFrame frame =
+                        frames.poll(100, TimeUnit.MILLISECONDS);
 
-        for (int y = 0; y < height; y++) {
-            int sourceY = height - 1 - y;
+                if (frame == null) {
+                    continue;
+                }
 
-            for (int x = 0; x < width; x++) {
-                int src = (sourceY * width + x) * 4;
-                int dst = y * width + x;
+                if (!encoder.isStarted()) {
+                    encoder.start(
+                            output,
+                            frame.width(),
+                            frame.height(),
+                            fps
+                    );
+                }
 
-                red[dst] = (byte) ((rgba[src] & 255) - 128);
-                green[dst] = (byte) ((rgba[src + 1] & 255) - 128);
-                blue[dst] = (byte) ((rgba[src + 2] & 255) - 128);
+                encoder.addFrame(frame);
             }
+
+            if (encoder.isStarted()) {
+                encoder.stop();
+            }
+
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            error = "Encoder interrupted";
+        } catch (Exception exception) {
+            error = exception.toString();
+        } finally {
+            active = false;
+            stopRequested.set(true);
+            frames.clear();
         }
-
-        encoder.encodeNativeFrame(picture);
     }
 
-    public void stop() throws IOException {
-        if (encoder == null) {
-            return;
-        }
-
-        SequenceEncoder current = encoder;
-        encoder = null;
-        current.finish();
+    public boolean isRecording() {
+        return active;
     }
 
-    public boolean isStarted() {
-        return encoder != null;
+    public boolean isPaused() {
+        return paused;
     }
-}
+
+    public String getError() {
+        return error;
+    }
+            }
