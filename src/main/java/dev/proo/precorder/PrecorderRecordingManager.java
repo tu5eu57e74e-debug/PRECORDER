@@ -32,6 +32,7 @@ public final class PrecorderRecordingManager {
     private volatile String error;
 
     private int fps;
+    private int resolution;
     private File output;
     private File logFile;
     private Thread worker;
@@ -78,7 +79,17 @@ public final class PrecorderRecordingManager {
             throw new IllegalStateException("Recorder is busy");
         }
 
-        fps = Math.max(1, config.fps);
+        fps = config.fps;
+        if (fps != 30 && fps != 60 && fps != 120) {
+            fps = 60;
+        }
+
+        resolution = config.resolution;
+        if (resolution != 480
+                && resolution != 720
+                && resolution != 1080) {
+            resolution = 1080;
+        }
 
         File directory = getRecordingsDirectory();
 
@@ -86,8 +97,10 @@ public final class PrecorderRecordingManager {
             throw new IOException("Could not create p-recordings folder");
         }
 
-        output = new File(directory,
-                "PRECORDER_" + System.currentTimeMillis() + ".mp4");
+        output = new File(
+                directory,
+                "PRECORDER_" + System.currentTimeMillis() + ".mp4"
+        );
 
         logFile = new File(directory, "precorder-error.log");
 
@@ -106,6 +119,22 @@ public final class PrecorderRecordingManager {
         worker = new Thread(this::encodeLoop, "PRECORDER-Encoder");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    private int calculateOutputWidth(int sourceWidth, int sourceHeight) {
+        if (sourceWidth <= 0 || sourceHeight <= 0) {
+            throw new IllegalArgumentException("Invalid source dimensions");
+        }
+
+        double aspectRatio = (double) sourceWidth / sourceHeight;
+
+        int calculatedWidth = (int) Math.round(
+                aspectRatio * resolution
+        );
+
+        calculatedWidth = calculatedWidth & ~1;
+
+        return Math.max(2, calculatedWidth);
     }
 
     public boolean shouldCapture() {
@@ -160,10 +189,16 @@ public final class PrecorderRecordingManager {
                 }
 
                 if (!encoder.isStarted()) {
+                    int outputHeight = resolution;
+                    int outputWidth = calculateOutputWidth(
+                            frame.width(),
+                            frame.height()
+                    );
+
                     encoder.start(
                             output,
-                            frame.width(),
-                            frame.height(),
+                            outputWidth,
+                            outputHeight,
                             fps
                     );
                 }
@@ -192,7 +227,9 @@ public final class PrecorderRecordingManager {
                 if (encodedFrames.get() == 0) {
                     saveError(
                             "No frames were encoded",
-                            new IOException("No video frames reached the encoder")
+                            new IOException(
+                                    "No video frames reached the encoder"
+                            )
                     );
                 } else if (!output.exists() || output.length() == 0) {
                     saveError(
@@ -254,4 +291,4 @@ public final class PrecorderRecordingManager {
     public long getDroppedFrames() {
         return droppedFrames.get();
     }
-                }
+                        }
