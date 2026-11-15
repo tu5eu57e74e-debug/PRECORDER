@@ -1,6 +1,8 @@
 
 package dev.proo.precorder;
 
+import net.fabricmc.loader.api.FabricLoader;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -36,10 +38,20 @@ public final class PrecorderRecordingManager {
 
         fps = Math.max(1, config.fps);
 
+        File recordingsDirectory = FabricLoader.getInstance()
+                .getGameDir()
+                .resolve("p-recordings")
+                .toFile();
+
+        if (!recordingsDirectory.exists()
+                && !recordingsDirectory.mkdirs()) {
+            throw new IOException("Could not create p-recordings folder");
+        }
+
         output = new File(
-                "precorder",
-                "PRECORDER_" + System.currentTimeMillis() + ".mov"
-        ).getAbsoluteFile();
+                recordingsDirectory,
+                "PRECORDER_" + System.currentTimeMillis() + ".mp4"
+        );
 
         frames.clear();
         stopRequested.set(false);
@@ -75,7 +87,6 @@ public final class PrecorderRecordingManager {
             return;
         }
 
-        // Never block the game/render thread.
         frames.offer(frame);
     }
 
@@ -141,4 +152,4 @@ public final class PrecorderRecordingManager {
     public String getError() {
         return error;
     }
-}
+    }
