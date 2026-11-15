@@ -1,21 +1,10 @@
 
 package dev.proo.precorder;
 
-import org.jcodec.codecs.h264.H264Encoder;
-import org.jcodec.common.Codec;
-import org.jcodec.common.MuxerTrack;
-import org.jcodec.common.VideoCodecMeta;
-import org.jcodec.common.VideoEncoder.EncodedFrame;
-import org.jcodec.common.io.NIOUtils;
-import org.jcodec.common.io.SeekableByteChannel;
-import org.jcodec.common.model.ColorSpace;
-import org.jcodec.common.model.Packet;
-import org.jcodec.common.model.Packet.FrameType;
-import org.jcodec.common.model.Picture;
-import org.jcodec.common.model.Size;
-import org.jcodec.containers.mp4.muxer.MP4Muxer;
-import org.jcodec.scale.ColorUtil;
-import org.jcodec.scale.Transform;
+import org.bytedeco.javacv.FFmpegFrameRecorder;
+import org.bytedeco.javacv.Frame;
+import org.bytedeco.ffmpeg.global.avcodec;
+import org.bytedeco.ffmpeg.global.avutil;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,22 +12,27 @@ import java.nio.ByteBuffer;
 
 public final class PrecorderVideoEncoder {
 
-    private MP4Muxer muxer;
-    private SeekableByteChannel channel;
-    private MuxerTrack videoTrack;
-    private H264Encoder h264Encoder;
-    private Transform rgbToYuv;
-    private Picture rgbPicture;
-    private Picture yuvPicture;
-    private ByteBuffer outputBuffer;
+    private FFmpegFrameRecorder recorder;
+    private Frame frame;
 
     private int width;
     private int height;
     private int fps;
+    private int bitrateMbps;
     private long frameNumber;
 
     public void start(File output, int width, int height, int fps)
             throws IOException {
+        start(output, width, height, fps, 12);
+    }
+
+    public void start(
+            File output,
+            int width,
+            int height,
+            int fps,
+            int bitrateMbps
+    ) throws IOException {
 
         if (isStarted()) {
             throw new IllegalStateException("Encoder already started");
@@ -54,98 +48,77 @@ public final class PrecorderVideoEncoder {
             );
         }
 
-        long bufferSize = (long) width * height * 6L;
-
-        if (bufferSize > Integer.MAX_VALUE) {
-            throw new IOException("Video dimensions are too large");
-        }
-
         File parent = output.getAbsoluteFile().getParentFile();
 
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
             throw new IOException("Could not create output directory");
         }
 
-        SeekableByteChannel openedChannel =
-                NIOUtils.writableChannel(output);
+        this.width = width;
+        this.height = height;
+        this.fps = fps;
+        this.bitrateMbps = Math.max(2, Math.min(50, bitrateMbps));
+        this.frameNumber = 0;
+
+        FFmpegFrameRecorder newRecorder = null;
 
         try {
-            MP4Muxer openedMuxer =
-                    MP4Muxer.createMP4MuxerToChannel(openedChannel);
+            newRecorder = new FFmpegFrameRecorder(
+                    output,
+                    width,
+                    height
+            );
 
-            H264Encoder openedEncoder =
-                    H264Encoder.createH264Encoder();
+            newRecorder.setFormat("mp4");
+            newRecorder.setVideoCodec(avcodec.AV_CODEC_ID_H264);
+            newRecorder.setPixelFormat(avutil.AV_PIX_FMT_YUV420P);
+            newRecorder.setFrameRate(fps);
+            newRecorder.setVideoBitrate(this.bitrateMbps * 1_000_000);
+            newRecorder.setGopSize(fps * 2);
+            newRecorder.setMaxBFrames(0);
 
-            ColorSpace encoderColor =
-                    openedEncoder.getSupportedColorSpaces()[0];
+            Frame newFrame = new Frame(
+                    width,
+                    height,
+                    Frame.DEPTH_UBYTE,
+                    3
+            );
 
-            Transform transform =
-                    ColorUtil.getTransform(
-                            ColorSpace.RGB,
-                            encoderColor
-                    );
+            newRecorder.start();
 
-            Picture rgb =
-                    Picture.create(width, height, ColorSpace.RGB);
-
-            Picture yuv =
-                    Picture.create(width, height, encoderColor);
-
-            ByteBuffer encodedBuffer =
-                    ByteBuffer.allocate((int) bufferSize);
-
-            VideoCodecMeta videoMeta =
-                    VideoCodecMeta.createSimpleVideoCodecMeta(
-                            new Size(width, height),
-                            encoderColor
-                    );
-
-            MuxerTrack track =
-                    openedMuxer.addVideoTrack(Codec.H264, videoMeta);
-
-            this.width = width;
-            this.height = height;
-            this.fps = fps;
-            this.frameNumber = 0L;
-
-            this.channel = openedChannel;
-            this.muxer = openedMuxer;
-            this.h264Encoder = openedEncoder;
-            this.rgbToYuv = transform;
-            this.rgbPicture = rgb;
-            this.yuvPicture = yuv;
-            this.outputBuffer = encodedBuffer;
-            this.videoTrack = track;
+            this.recorder = newRecorder;
+            this.frame = newFrame;
 
         } catch (Throwable error) {
-            NIOUtils.closeQuietly(openedChannel);
+            if (newRecorder != null) {
+                try {
+                    newRecorder.release();
+                } catch (Throwable ignored) {
+                }
+            }
 
             if (error instanceof IOException io) {
                 throw io;
             }
 
-            if (error instanceof RuntimeException runtime) {
-                throw runtime;
-            }
-
             throw new IOException(
-                    "Could not initialize video encoder",
+                    "Could not initialize FFmpeg H264 encoder",
                     error
             );
         }
     }
 
-    public void addFrame(PrecorderCapture.CapturedFrame frame)
+    public void addFrame(PrecorderCapture.CapturedFrame captured)
             throws IOException {
 
-        if (frame == null) {
+        if (captured == null) {
             throw new IllegalArgumentException("Frame is required");
         }
 
         encodeRgba(
-                frame.rgba(),
-                frame.width(),
-                frame.height()
+                captured.rgba(),
+                captured.width(),
+                captured.height()
         );
     }
 
@@ -170,85 +143,88 @@ public final class PrecorderVideoEncoder {
             throw new IllegalArgumentException("Invalid RGBA frame");
         }
 
-        byte[] rgb = rgbPicture.getPlaneData(0);
+        ByteBuffer destination = (ByteBuffer) frame.image[0];
+        destination.clear();
 
         for (int y = 0; y < height; y++) {
 
-            int sourceY = (int) ((long) y * sourceHeight / height);
-            int flippedY = height - 1 - y;
+            int sourceY = (int) (
+                    (long) (height - 1 - y) * sourceHeight / height
+            );
 
             for (int x = 0; x < width; x++) {
 
-                int sourceX = (int) ((long) x * sourceWidth / width);
+                int sourceX = (int) (
+                        (long) x * sourceWidth / width
+                );
 
-                int src = (sourceY * sourceWidth + sourceX) * 4;
-                int dst = (flippedY * width + x) * 3;
+                int sourceIndex =
+                        (sourceY * sourceWidth + sourceX) * 4;
 
-                rgb[dst] =
-                        (byte) ((rgba[src] & 255) - 128);
-
-                rgb[dst + 1] =
-                        (byte) ((rgba[src + 1] & 255) - 128);
-
-                rgb[dst + 2] =
-                        (byte) ((rgba[src + 2] & 255) - 128);
+                // Convert RGBA to BGR for JavaCV.
+                destination.put(rgba[sourceIndex + 2]);
+                destination.put(rgba[sourceIndex + 1]);
+                destination.put(rgba[sourceIndex]);
             }
         }
 
-        rgbToYuv.transform(rgbPicture, yuvPicture);
+        destination.flip();
 
-        outputBuffer.clear();
+        frame.timestamp = frameNumber * 1_000_000L / fps;
 
-        EncodedFrame encoded =
-                h264Encoder.encodeFrame(yuvPicture, outputBuffer);
+        try {
+            recorder.record(frame);
+            frameNumber++;
 
-        if (encoded == null || encoded.getData() == null) {
-            throw new IOException("H264 encoder returned an empty frame");
+        } catch (Exception error) {
+            throw new IOException(
+                    "FFmpeg failed to encode frame " + frameNumber,
+                    error
+            );
         }
-
-        Packet packet = Packet.createPacket(
-                encoded.getData(),
-                frameNumber,
-                fps,
-                1,
-                frameNumber,
-                encoded.isKeyFrame()
-                        ? FrameType.KEY
-                        : FrameType.INTER,
-                null
-        );
-
-        videoTrack.addFrame(packet);
-        frameNumber++;
     }
 
     public void stop() throws IOException {
 
-        if (!isStarted()) {
+        FFmpegFrameRecorder current = recorder;
+
+        if (current == null) {
             return;
         }
 
-        MP4Muxer currentMuxer = muxer;
-        SeekableByteChannel currentChannel = channel;
+        recorder = null;
+        frame = null;
 
-        muxer = null;
-        channel = null;
-        videoTrack = null;
-        h264Encoder = null;
-        rgbToYuv = null;
-        rgbPicture = null;
-        yuvPicture = null;
-        outputBuffer = null;
+        IOException failure = null;
 
         try {
-            currentMuxer.finish();
+            current.stop();
+        } catch (Exception error) {
+            failure = new IOException(
+                    "FFmpeg could not finalize MP4",
+                    error
+            );
         } finally {
-            NIOUtils.closeQuietly(currentChannel);
+            try {
+                current.release();
+            } catch (Exception error) {
+                if (failure == null) {
+                    failure = new IOException(
+                            "Could not release FFmpeg resources",
+                            error
+                    );
+                } else {
+                    failure.addSuppressed(error);
+                }
+            }
+        }
+
+        if (failure != null) {
+            throw failure;
         }
     }
 
     public boolean isStarted() {
-        return muxer != null;
+        return recorder != null;
     }
-            }
-                
+}
