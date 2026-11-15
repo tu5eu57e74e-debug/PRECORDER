@@ -15,6 +15,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class PrecorderRecordingManager {
 
@@ -22,14 +23,13 @@ public final class PrecorderRecordingManager {
             new ArrayBlockingQueue<>(2);
 
     private final AtomicBoolean stopRequested = new AtomicBoolean(false);
+    private final AtomicLong capturedFrames = new AtomicLong();
+    private final AtomicLong encodedFrames = new AtomicLong();
+    private final AtomicLong droppedFrames = new AtomicLong();
 
     private volatile boolean active;
     private volatile boolean paused;
     private volatile String error;
-
-    private volatile long capturedFrames;
-    private volatile long encodedFrames;
-    private volatile long droppedFrames;
 
     private int fps;
     private File output;
@@ -95,9 +95,11 @@ public final class PrecorderRecordingManager {
         stopRequested.set(false);
         paused = false;
         error = null;
-        capturedFrames = 0;
-        encodedFrames = 0;
-        droppedFrames = 0;
+
+        capturedFrames.set(0);
+        encodedFrames.set(0);
+        droppedFrames.set(0);
+
         lastCaptureTime = 0;
         active = true;
 
@@ -128,9 +130,9 @@ public final class PrecorderRecordingManager {
         }
 
         if (frames.offer(frame)) {
-            capturedFrames++;
+            capturedFrames.incrementAndGet();
         } else {
-            droppedFrames++;
+            droppedFrames.incrementAndGet();
         }
     }
 
@@ -158,29 +160,48 @@ public final class PrecorderRecordingManager {
                 }
 
                 if (!encoder.isStarted()) {
-                    encoder.start(output, frame.width(), frame.height(), fps);
+                    encoder.start(
+                            output,
+                            frame.width(),
+                            frame.height(),
+                            fps
+                    );
                 }
 
                 encoder.addFrame(frame);
-                encodedFrames++;
-            }
-
-            if (encoder.isStarted()) {
-                encoder.stop();
-            } else if (capturedFrames == 0) {
-                throw new IOException("No frames were captured");
-            }
-
-            if (!output.exists() || output.length() == 0) {
-                throw new IOException("Encoder produced an empty MP4 file");
+                encodedFrames.incrementAndGet();
             }
 
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             saveError("Encoder interrupted", exception);
+
         } catch (Throwable exception) {
             saveError("Recording failed", exception);
+
         } finally {
+            if (encoder.isStarted()) {
+                try {
+                    encoder.stop();
+                } catch (Throwable exception) {
+                    saveError("Could not finalize MP4", exception);
+                }
+            }
+
+            if (error == null) {
+                if (encodedFrames.get() == 0) {
+                    saveError(
+                            "No frames were encoded",
+                            new IOException("No video frames reached the encoder")
+                    );
+                } else if (!output.exists() || output.length() == 0) {
+                    saveError(
+                            "Empty MP4 file",
+                            new IOException("Encoder produced an empty file")
+                    );
+                }
+            }
+
             active = false;
             stopRequested.set(true);
             frames.clear();
@@ -223,14 +244,14 @@ public final class PrecorderRecordingManager {
     }
 
     public long getCapturedFrames() {
-        return capturedFrames;
+        return capturedFrames.get();
     }
 
     public long getEncodedFrames() {
-        return encodedFrames;
+        return encodedFrames.get();
     }
 
     public long getDroppedFrames() {
-        return droppedFrames;
+        return droppedFrames.get();
     }
-    }
+                }
