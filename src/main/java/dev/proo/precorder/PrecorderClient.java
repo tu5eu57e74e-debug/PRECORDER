@@ -3,9 +3,11 @@ package dev.proo.precorder;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 
 public final class PrecorderClient implements ClientModInitializer {
 
@@ -83,31 +85,44 @@ public final class PrecorderClient implements ClientModInitializer {
             }
         });
 
-        WorldRenderEvents.END_MAIN.register(context -> {
-            MinecraftClient client = MinecraftClient.getInstance();
+        HudElementRegistry.attachElementAfter(
+                VanillaHudElements.SUBTITLES,
+                Identifier.of("precorder", "capture"),
+                (drawContext, tickCounter) -> {
+                    MinecraftClient client =
+                            MinecraftClient.getInstance();
 
-            if (!RECORDER.shouldCapture()) {
-                return;
-            }
+                    if (client.player == null
+                            || !RECORDER.shouldCapture()) {
+                        return;
+                    }
 
-            try {
-                PrecorderCapture.captureFrame(client, RECORDER::submit);
-            } catch (Throwable error) {
-                String details = error.getClass().getSimpleName()
-                        + ": " + error.getMessage();
+                    try {
+                        PrecorderCapture.captureFrame(
+                                client,
+                                RECORDER::submit
+                        );
+                    } catch (Throwable error) {
+                        String details =
+                                error.getClass().getSimpleName()
+                                        + ": " + error.getMessage();
 
-                if (!details.equals(lastErrorShown)) {
-                    lastErrorShown = details;
-                    message(client, "Capture error: " + details);
+                        if (!details.equals(lastErrorShown)) {
+                            lastErrorShown = details;
+                            message(client, "Capture error: " + details);
+                        }
+
+                        RECORDER.stop();
+                        PrecorderState.stop();
+                    }
                 }
-
-                RECORDER.stop();
-                PrecorderState.stop();
-            }
-        });
+        );
     }
 
-    private static void message(MinecraftClient client, String text) {
+    private static void message(
+            MinecraftClient client,
+            String text
+    ) {
         if (client.player != null) {
             client.player.sendMessage(
                     Text.literal("PRECORDER: " + text),
@@ -115,4 +130,5 @@ public final class PrecorderClient implements ClientModInitializer {
             );
         }
     }
-}
+                        }
+        
