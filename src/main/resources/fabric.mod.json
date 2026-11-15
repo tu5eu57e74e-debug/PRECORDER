@@ -8,6 +8,9 @@
   "authors": ["PRoo"],
   "environment": "client",
   "entrypoints": {
+    "mixins": [
+  "precorder.mixins.json"
+],
     "client": ["dev.proo.precorder.PrecorderClient"]
   },
   "depends": {
