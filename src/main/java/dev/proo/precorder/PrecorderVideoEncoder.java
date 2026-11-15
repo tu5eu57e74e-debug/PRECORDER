@@ -4,6 +4,7 @@ package dev.proo.precorder;
 import org.jcodec.codecs.h264.H264Encoder;
 import org.jcodec.common.Codec;
 import org.jcodec.common.MuxerTrack;
+import org.jcodec.common.VideoCodecMeta;
 import org.jcodec.common.VideoEncoder.EncodedFrame;
 import org.jcodec.common.io.NIOUtils;
 import org.jcodec.common.io.SeekableByteChannel;
@@ -11,6 +12,7 @@ import org.jcodec.common.model.ColorSpace;
 import org.jcodec.common.model.Packet;
 import org.jcodec.common.model.Packet.FrameType;
 import org.jcodec.common.model.Picture;
+import org.jcodec.common.model.Size;
 import org.jcodec.containers.mp4.muxer.MP4Muxer;
 import org.jcodec.scale.ColorUtil;
 import org.jcodec.scale.Transform;
@@ -92,8 +94,14 @@ public final class PrecorderVideoEncoder {
             ByteBuffer encodedBuffer =
                     ByteBuffer.allocate((int) bufferSize);
 
+            VideoCodecMeta videoMeta =
+                    VideoCodecMeta.createSimpleVideoCodecMeta(
+                            new Size(width, height),
+                            encoderColor
+                    );
+
             MuxerTrack track =
-                    openedMuxer.addVideoTrack(Codec.H264, null);
+                    openedMuxer.addVideoTrack(Codec.H264, videoMeta);
 
             this.width = width;
             this.height = height;
@@ -120,7 +128,10 @@ public final class PrecorderVideoEncoder {
                 throw runtime;
             }
 
-            throw new IOException("Could not initialize video encoder", error);
+            throw new IOException(
+                    "Could not initialize video encoder",
+                    error
+            );
         }
     }
 
@@ -131,36 +142,56 @@ public final class PrecorderVideoEncoder {
             throw new IllegalArgumentException("Frame is required");
         }
 
-        if (frame.width() != width || frame.height() != height) {
-            throw new IllegalArgumentException("Frame dimensions changed");
-        }
-
-        addFrame(frame.rgba());
+        encodeRgba(
+                frame.rgba(),
+                frame.width(),
+                frame.height()
+        );
     }
 
     public void addFrame(byte[] rgba) throws IOException {
+        encodeRgba(rgba, width, height);
+    }
+
+    private void encodeRgba(
+            byte[] rgba,
+            int sourceWidth,
+            int sourceHeight
+    ) throws IOException {
 
         if (!isStarted()) {
             throw new IllegalStateException("Encoder not started");
         }
 
         if (rgba == null
-                || rgba.length != (long) width * height * 4L) {
+                || sourceWidth <= 0
+                || sourceHeight <= 0
+                || rgba.length != (long) sourceWidth * sourceHeight * 4L) {
             throw new IllegalArgumentException("Invalid RGBA frame");
         }
 
         byte[] rgb = rgbPicture.getPlaneData(0);
 
         for (int y = 0; y < height; y++) {
-            int sourceY = height - 1 - y;
+
+            int sourceY = (int) ((long) y * sourceHeight / height);
+            int flippedY = height - 1 - y;
 
             for (int x = 0; x < width; x++) {
-                int src = (sourceY * width + x) * 4;
-                int dst = (y * width + x) * 3;
 
-                rgb[dst] = (byte) ((rgba[src] & 255) - 128);
-                rgb[dst + 1] = (byte) ((rgba[src + 1] & 255) - 128);
-                rgb[dst + 2] = (byte) ((rgba[src + 2] & 255) - 128);
+                int sourceX = (int) ((long) x * sourceWidth / width);
+
+                int src = (sourceY * sourceWidth + sourceX) * 4;
+                int dst = (flippedY * width + x) * 3;
+
+                rgb[dst] =
+                        (byte) ((rgba[src] & 255) - 128);
+
+                rgb[dst + 1] =
+                        (byte) ((rgba[src + 1] & 255) - 128);
+
+                rgb[dst + 2] =
+                        (byte) ((rgba[src + 2] & 255) - 128);
             }
         }
 
@@ -170,6 +201,10 @@ public final class PrecorderVideoEncoder {
 
         EncodedFrame encoded =
                 h264Encoder.encodeFrame(yuvPicture, outputBuffer);
+
+        if (encoded == null || encoded.getData() == null) {
+            throw new IOException("H264 encoder returned an empty frame");
+        }
 
         Packet packet = Packet.createPacket(
                 encoded.getData(),
@@ -215,4 +250,5 @@ public final class PrecorderVideoEncoder {
     public boolean isStarted() {
         return muxer != null;
     }
-        }
+            }
+                
