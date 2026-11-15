@@ -2,9 +2,12 @@
 package dev.proo.precorder;
 
 import net.fabricmc.loader.api.FabricLoader;
+import net.fabricmc.loader.api.ModContainer;
+import net.fabricmc.loader.api.metadata.ModOrigin;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -25,6 +28,42 @@ public final class PrecorderRecordingManager {
     private Thread worker;
     private long lastCaptureTime;
 
+    private File getRecordingsDirectory() throws IOException {
+
+        ModContainer mod = FabricLoader.getInstance()
+                .getModContainer("precorder")
+                .orElseThrow(() ->
+                        new IOException("PRECORDER mod container not found"));
+
+        if (mod.getOrigin().getKind() != ModOrigin.Kind.PATH) {
+            throw new IOException("Could not locate PRECORDER mod folder");
+        }
+
+        for (Path modPath : mod.getOrigin().getPaths()) {
+
+            Path modsDirectory = modPath.getParent();
+
+            if (modsDirectory == null
+                    || modsDirectory.getFileName() == null
+                    || !modsDirectory.getFileName()
+                            .toString().equalsIgnoreCase("mods")) {
+                continue;
+            }
+
+            Path versionDirectory = modsDirectory.getParent();
+
+            if (versionDirectory == null) {
+                continue;
+            }
+
+            return versionDirectory.resolve("p-recordings").toFile();
+        }
+
+        throw new IOException(
+                "Could not locate the active version's mods folder"
+        );
+    }
+
     public synchronized void start(PrecorderConfig config)
             throws IOException {
 
@@ -38,10 +77,7 @@ public final class PrecorderRecordingManager {
 
         fps = Math.max(1, config.fps);
 
-        File recordingsDirectory = FabricLoader.getInstance()
-                .getGameDir()
-                .resolve("p-recordings")
-                .toFile();
+        File recordingsDirectory = getRecordingsDirectory();
 
         if (!recordingsDirectory.exists()
                 && !recordingsDirectory.mkdirs()) {
@@ -149,9 +185,7 @@ public final class PrecorderRecordingManager {
         return paused;
     }
 
-
     public String getError() {
         return error;
     }
 }
-
