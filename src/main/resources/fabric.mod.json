@@ -8,11 +8,13 @@
   "authors": ["PRoo"],
   "environment": "client",
   "entrypoints": {
-    "mixins": [
-  "precorder.mixins.json"
-],
-    "client": ["dev.proo.precorder.PrecorderClient"]
+    "client": [
+      "dev.proo.precorder.PrecorderClient"
+    ]
   },
+  "mixins": [
+    "precorder.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.18.0",
     "minecraft": "~1.21.11",
