@@ -149,7 +149,9 @@ public final class PrecorderRecordingManager {
         return paused;
     }
 
+
     public String getError() {
         return error;
     }
-    }
+}
+
