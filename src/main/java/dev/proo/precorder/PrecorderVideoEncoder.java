@@ -19,7 +19,10 @@ public final class PrecorderVideoEncoder {
     private int height;
     private int fps;
     private int bitrateMbps;
+
     private long frameNumber;
+    private long firstTimestampNanos = -1;
+    private long lastTimestampMicros = -1;
 
     public void start(File output, int width, int height, int fps)
             throws IOException {
@@ -58,7 +61,10 @@ public final class PrecorderVideoEncoder {
         this.height = height;
         this.fps = fps;
         this.bitrateMbps = Math.max(2, Math.min(50, bitrateMbps));
+
         this.frameNumber = 0;
+        this.firstTimestampNanos = -1;
+        this.lastTimestampMicros = -1;
 
         FFmpegFrameRecorder newRecorder = null;
         Frame newFrame = null;
@@ -130,18 +136,28 @@ public final class PrecorderVideoEncoder {
         encodeRgba(
                 captured.rgba(),
                 captured.width(),
-                captured.height()
+                captured.height(),
+                captured.timestampNanos()
         );
     }
 
     public void addFrame(byte[] rgba) throws IOException {
-        encodeRgba(rgba, width, height);
+        long syntheticTimestamp =
+                frameNumber * 1_000_000_000L / fps;
+
+        encodeRgba(
+                rgba,
+                width,
+                height,
+                syntheticTimestamp
+        );
     }
 
     private void encodeRgba(
             byte[] rgba,
             int sourceWidth,
-            int sourceHeight
+            int sourceHeight,
+            long timestampNanos
     ) throws IOException {
 
         if (!isStarted()) {
@@ -153,6 +169,10 @@ public final class PrecorderVideoEncoder {
                 || sourceHeight <= 0
                 || rgba.length != (long) sourceWidth * sourceHeight * 4L) {
             throw new IllegalArgumentException("Invalid RGBA frame");
+        }
+
+        if (timestampNanos < 0) {
+            throw new IllegalArgumentException("Invalid frame timestamp");
         }
 
         ByteBuffer destination = (ByteBuffer) frame.image[0];
@@ -190,7 +210,6 @@ public final class PrecorderVideoEncoder {
                 destination.put(rgba[sourceIndex]);
             }
 
-            // Fill row-alignment padding.
             while (destination.position() < rowStart + stride) {
                 destination.put((byte) 0);
             }
@@ -199,10 +218,28 @@ public final class PrecorderVideoEncoder {
         destination.position(0);
         destination.limit(height * stride);
 
-        frame.timestamp = frameNumber * 1_000_000L / fps;
+        if (firstTimestampNanos < 0) {
+            firstTimestampNanos = timestampNanos;
+        }
+
+        long elapsedNanos = Math.max(
+                0L,
+                timestampNanos - firstTimestampNanos
+        );
+
+        long timestampMicros = elapsedNanos / 1_000L;
+
+        // Keep timestamps strictly increasing.
+        if (timestampMicros <= lastTimestampMicros) {
+            timestampMicros = lastTimestampMicros + 1;
+        }
+
+        frame.timestamp = timestampMicros;
 
         try {
             recorder.record(frame);
+
+            lastTimestampMicros = timestampMicros;
             frameNumber++;
 
         } catch (Exception error) {
@@ -272,5 +309,5 @@ public final class PrecorderVideoEncoder {
     public boolean isStarted() {
         return recorder != null;
     }
-    }
-                 
+                }
+    
