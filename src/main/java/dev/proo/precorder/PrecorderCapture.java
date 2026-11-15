@@ -12,6 +12,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.Framebuffer;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -63,34 +64,27 @@ public final class PrecorderCapture {
         RenderSystem.assertOnRenderThread();
 
         if (client == null || onCaptured == null) {
-            throw new IllegalArgumentException(
-                    "Missing capture arguments"
-            );
+            throw new IllegalArgumentException("Missing capture arguments");
         }
 
         Framebuffer framebuffer = client.getFramebuffer();
         GpuTexture texture = framebuffer.getColorAttachment();
 
         if (texture == null) {
-            throw new IllegalStateException(
-                    "Framebuffer texture is missing"
-            );
+            throw new IllegalStateException("Framebuffer texture is missing");
         }
 
         if (texture.getFormat() != TextureFormat.RGBA8) {
             throw new IllegalStateException(
-                    "Unsupported framebuffer format: "
-                            + texture.getFormat()
+                    "Unsupported framebuffer format: " + texture.getFormat()
             );
         }
 
-        // Verify that the framebuffer supports GPU readback.
         int textureUsage = texture.usage();
 
         if ((textureUsage & GpuTexture.USAGE_COPY_SRC) == 0) {
             throw new IllegalStateException(
-                    "Framebuffer does not support GPU readback "
-                            + "(COPY_SRC missing, usage="
+                    "Framebuffer does not support GPU readback (COPY_SRC missing, usage="
                             + textureUsage + ")"
             );
         }
@@ -107,13 +101,10 @@ public final class PrecorderCapture {
         long size = (long) w * h * 4L;
 
         if (size > Integer.MAX_VALUE) {
-            throw new IllegalStateException(
-                    "Frame is too large"
-            );
+            throw new IllegalStateException("Frame is too large");
         }
 
         if (w != width || h != height) {
-
             for (AtomicBoolean state : busy) {
                 if (state.get()) {
                     return;
@@ -127,8 +118,7 @@ public final class PrecorderCapture {
 
                 buffers[i] = RenderSystem.getDevice().createBuffer(
                         () -> "PRECORDER readback " + index,
-                        GpuBuffer.USAGE_COPY_DST
-                                | GpuBuffer.USAGE_MAP_READ,
+                        GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ,
                         size
                 );
             }
@@ -141,8 +131,7 @@ public final class PrecorderCapture {
         int slot = -1;
 
         for (int i = 0; i < BUFFER_COUNT; i++) {
-            int candidate =
-                    (nextSlot + i) % BUFFER_COUNT;
+            int candidate = (nextSlot + i) % BUFFER_COUNT;
 
             if (!busy[candidate].get()) {
                 slot = candidate;
@@ -178,13 +167,13 @@ public final class PrecorderCapture {
                     0L,
                     () -> {
                         try (MappedView mapped =
-                                     encoder.mapBuffer(
-                                             buffer,
-                                             true,
-                                             false
-                                     )) {
+                                     encoder.mapBuffer(buffer, true, false)) {
 
                             ByteBuffer source = mapped.data();
+
+                            int mappedCapacity = source.capacity();
+                            int mappedLimit = source.limit();
+                            int mappedRemaining = source.remaining();
 
                             source.position(0);
 
@@ -192,50 +181,41 @@ public final class PrecorderCapture {
                                 throw new IllegalStateException(
                                         "Incomplete GPU frame: "
                                                 + source.remaining()
-                                                + "/"
-                                                + expectedSize
+                                                + "/" + expectedSize
                                 );
                             }
 
-                            byte[] pixels =
-                                    new byte[expectedSize];
-
+                            byte[] pixels = new byte[expectedSize];
                             source.get(pixels);
 
-                            if (diagnosticPrinted.compareAndSet(
-                                    false,
-                                    true
-                            )) {
+                            if (diagnosticPrinted.compareAndSet(false, true)) {
                                 long nonBlackPixels = 0;
+                                long[] nonBlackByBand = new long[8];
 
                                 int minValue = 255;
                                 int maxValue = 0;
 
-                                for (int i = 0;
-                                     i < pixels.length;
-                                     i += 4) {
+                                for (int i = 0; i < pixels.length; i += 4) {
+                                    int red = pixels[i] & 0xFF;
+                                    int green = pixels[i + 1] & 0xFF;
+                                    int blue = pixels[i + 2] & 0xFF;
 
-                                    int red =
-                                            pixels[i] & 0xFF;
-
-                                    int green =
-                                            pixels[i + 1] & 0xFF;
-
-                                    int blue =
-                                            pixels[i + 2] & 0xFF;
-
-                                    if (red != 0
-                                            || green != 0
-                                            || blue != 0) {
+                                    if (red != 0 || green != 0 || blue != 0) {
                                         nonBlackPixels++;
+
+                                        int pixelIndex = i / 4;
+                                        int band = Math.min(
+                                                7,
+                                                (int) ((long) pixelIndex * 8
+                                                        / ((long) frameWidth * frameHeight))
+                                        );
+
+                                        nonBlackByBand[band]++;
                                     }
 
                                     minValue = Math.min(
                                             minValue,
-                                            Math.min(
-                                                    red,
-                                                    Math.min(green, blue)
-                                            )
+                                            Math.min(red, Math.min(green, blue))
                                     );
 
                                     maxValue = Math.max(
@@ -249,41 +229,39 @@ public final class PrecorderCapture {
                                 );
 
                                 System.out.println(
-                                        "[PRECORDER] Texture format: "
-                                                + texture.getFormat()
+                                        "[PRECORDER] Mapped capacity: " + mappedCapacity
+                                                + ", limit: " + mappedLimit
+                                                + ", remaining: " + mappedRemaining
+                                                + ", expected: " + expectedSize
                                 );
 
                                 System.out.println(
-                                        "[PRECORDER] Texture usage: "
-                                                + texture.usage()
+                                        "[PRECORDER] Texture format: " + texture.getFormat()
                                 );
 
                                 System.out.println(
-                                        "[PRECORDER] COPY_SRC enabled: "
-                                                + ((texture.usage()
-                                                & GpuTexture.USAGE_COPY_SRC) != 0)
+                                        "[PRECORDER] Texture usage: " + texture.usage()
                                 );
 
                                 System.out.println(
                                         "[PRECORDER] Dimensions: "
-                                                + frameWidth
-                                                + "x"
-                                                + frameHeight
+                                                + frameWidth + "x" + frameHeight
                                 );
 
                                 System.out.println(
                                         "[PRECORDER] Non-black pixels: "
-                                                + nonBlackPixels
-                                                + " / "
-                                                + ((long) frameWidth
-                                                * frameHeight)
+                                                + nonBlackPixels + " / "
+                                                + ((long) frameWidth * frameHeight)
                                 );
 
                                 System.out.println(
                                         "[PRECORDER] RGB range: "
-                                                + minValue
-                                                + " - "
-                                                + maxValue
+                                                + minValue + " - " + maxValue
+                                );
+
+                                System.out.println(
+                                        "[PRECORDER] Non-black pixels by vertical band: "
+                                                + Arrays.toString(nonBlackByBand)
                                 );
 
                                 System.out.println(
@@ -303,15 +281,12 @@ public final class PrecorderCapture {
                             lastError = null;
 
                         } catch (Throwable error) {
-
                             lastError =
                                     error.getClass().getSimpleName()
-                                            + ": "
-                                            + error.getMessage();
+                                            + ": " + error.getMessage();
 
                             System.err.println(
-                                    "[PRECORDER] GPU readback failed: "
-                                            + lastError
+                                    "[PRECORDER] GPU readback failed: " + lastError
                             );
 
                             error.printStackTrace();
@@ -324,32 +299,22 @@ public final class PrecorderCapture {
                     0
             );
 
-            nextSlot =
-                    (selectedSlot + 1) % BUFFER_COUNT;
+            nextSlot = (selectedSlot + 1) % BUFFER_COUNT;
 
         } catch (Throwable error) {
-
             busy[selectedSlot].set(false);
             pendingCaptures.decrementAndGet();
 
             lastError =
                     error.getClass().getSimpleName()
-                            + ": "
-                            + error.getMessage();
+                            + ": " + error.getMessage();
 
-            throw new RuntimeException(
-                    "GPU capture failed",
-                    error
-            );
+            throw new RuntimeException("GPU capture failed", error);
         }
     }
 
-    private static String bytesToHex(
-            byte[] data,
-            int count
-    ) {
+    private static String bytesToHex(byte[] data, int count) {
         StringBuilder result = new StringBuilder();
-
         int length = Math.min(data.length, count);
 
         for (int i = 0; i < length; i++) {
@@ -357,9 +322,7 @@ public final class PrecorderCapture {
                 result.append(' ');
             }
 
-            result.append(
-                    String.format("%02X", data[i] & 0xFF)
-            );
+            result.append(String.format("%02X", data[i] & 0xFF));
         }
 
         return result.toString();
@@ -367,7 +330,6 @@ public final class PrecorderCapture {
 
     private static void releaseBuffers() {
         for (int i = 0; i < BUFFER_COUNT; i++) {
-
             if (buffers[i] != null) {
                 buffers[i].close();
                 buffers[i] = null;
@@ -376,4 +338,4 @@ public final class PrecorderCapture {
             busy[i].set(false);
         }
     }
-                }
+}
