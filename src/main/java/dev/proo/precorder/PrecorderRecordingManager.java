@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class PrecorderRecordingManager {
 
     private final ArrayBlockingQueue<PrecorderCapture.CapturedFrame> frames =
-            new ArrayBlockingQueue<>(2);
+        new ArrayBlockingQueue<>(12);
 
     private final AtomicBoolean stopRequested = new AtomicBoolean(false);
     private final AtomicLong capturedFrames = new AtomicLong();
@@ -40,9 +40,10 @@ public final class PrecorderRecordingManager {
 
     private File getRecordingsDirectory() throws IOException {
         ModContainer mod = FabricLoader.getInstance()
-                .getModContainer("precorder")
-                .orElseThrow(() ->
-                        new IOException("PRECORDER mod container not found"));
+            .getModContainer("precorder")
+            .orElseThrow(() -> new IOException(
+                "PRECORDER mod container not found"
+            ));
 
         if (mod.getOrigin().getKind() != ModOrigin.Kind.PATH) {
             throw new IOException("Could not locate PRECORDER mod folder");
@@ -51,10 +52,10 @@ public final class PrecorderRecordingManager {
         for (Path modPath : mod.getOrigin().getPaths()) {
             Path modsDirectory = modPath.getParent();
 
-            if (modsDirectory == null
-                    || modsDirectory.getFileName() == null
-                    || !modsDirectory.getFileName()
-                    .toString().equalsIgnoreCase("mods")) {
+            if (modsDirectory == null ||
+                modsDirectory.getFileName() == null ||
+                !modsDirectory.getFileName().toString()
+                    .equalsIgnoreCase("mods")) {
                 continue;
             }
 
@@ -80,14 +81,10 @@ public final class PrecorderRecordingManager {
         }
 
         fps = config.fps;
-        if (fps != 30 && fps != 60 && fps != 120) {
-            fps = 60;
-        }
+        if (fps != 30 && fps != 60 && fps != 120) fps = 60;
 
         resolution = config.resolution;
-        if (resolution != 480
-                && resolution != 720
-                && resolution != 1080) {
+        if (resolution != 480 && resolution != 720 && resolution != 1080) {
             resolution = 1080;
         }
 
@@ -98,8 +95,8 @@ public final class PrecorderRecordingManager {
         }
 
         output = new File(
-                directory,
-                "PRECORDER_" + System.currentTimeMillis() + ".mp4"
+            directory,
+            "PRECORDER_" + System.currentTimeMillis() + ".mp4"
         );
 
         logFile = new File(directory, "precorder-error.log");
@@ -127,36 +124,31 @@ public final class PrecorderRecordingManager {
         }
 
         double aspectRatio = (double) sourceWidth / sourceHeight;
+        int calculatedWidth = (int) Math.round(aspectRatio * resolution);
 
-        int calculatedWidth = (int) Math.round(
-                aspectRatio * resolution
-        );
-
-        calculatedWidth = calculatedWidth & ~1;
+        calculatedWidth &= ~1;
 
         return Math.max(2, calculatedWidth);
     }
 
     public boolean shouldCapture() {
-        if (!active || paused || stopRequested.get()) {
-            return false;
-        }
+        if (!active || paused || stopRequested.get()) return false;
 
         long now = System.nanoTime();
         long interval = 1_000_000_000L / fps;
 
-        if (now - lastCaptureTime < interval) {
-            return false;
-        }
+        if (now - lastCaptureTime < interval) return false;
 
         lastCaptureTime = now;
         return true;
     }
 
     public void submit(PrecorderCapture.CapturedFrame frame) {
-        if (frame == null || !active || paused || stopRequested.get()) {
-            return;
-        }
+        if (frame == null) return;
+
+        // Allow already-started GPU readbacks to finish after Stop.
+        if (!active && !stopRequested.get()) return;
+        if (paused && !stopRequested.get()) return;
 
         if (frames.offer(frame)) {
             capturedFrames.incrementAndGet();
@@ -172,6 +164,7 @@ public final class PrecorderRecordingManager {
     public synchronized void stop() {
         if (active) {
             active = false;
+            paused = false;
             stopRequested.set(true);
         }
     }
@@ -180,27 +173,23 @@ public final class PrecorderRecordingManager {
         PrecorderVideoEncoder encoder = new PrecorderVideoEncoder();
 
         try {
-            while (!stopRequested.get() || !frames.isEmpty()) {
-                PrecorderCapture.CapturedFrame frame =
-                        frames.poll(100, TimeUnit.MILLISECONDS);
+            while (!stopRequested.get()
+                    || !frames.isEmpty()
+                    || PrecorderCapture.getPendingCaptures() > 0) {
 
-                if (frame == null) {
-                    continue;
-                }
+                PrecorderCapture.CapturedFrame frame =
+                    frames.poll(100, TimeUnit.MILLISECONDS);
+
+                if (frame == null) continue;
 
                 if (!encoder.isStarted()) {
                     int outputHeight = resolution;
                     int outputWidth = calculateOutputWidth(
-                            frame.width(),
-                            frame.height()
+                        frame.width(),
+                        frame.height()
                     );
 
-                    encoder.start(
-                            output,
-                            outputWidth,
-                            outputHeight,
-                            fps
-                    );
+                    encoder.start(output, outputWidth, outputHeight, fps);
                 }
 
                 encoder.addFrame(frame);
@@ -226,15 +215,13 @@ public final class PrecorderRecordingManager {
             if (error == null) {
                 if (encodedFrames.get() == 0) {
                     saveError(
-                            "No frames were encoded",
-                            new IOException(
-                                    "No video frames reached the encoder"
-                            )
+                        "No frames were encoded",
+                        new IOException("No video frames reached the encoder")
                     );
                 } else if (!output.exists() || output.length() == 0) {
                     saveError(
-                            "Empty MP4 file",
-                            new IOException("Encoder produced an empty file")
+                        "Empty MP4 file",
+                        new IOException("Encoder produced an empty file")
                     );
                 }
             }
@@ -253,11 +240,11 @@ public final class PrecorderRecordingManager {
 
         try {
             Files.writeString(
-                    logFile.toPath(),
-                    "\n\n--- " + java.time.Instant.now() + " ---\n"
-                            + message + "\n" + writer,
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.APPEND
+                logFile.toPath(),
+                "\n\n--- " + java.time.Instant.now() + " ---\n"
+                    + message + "\n" + writer,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.APPEND
             );
         } catch (IOException logError) {
             System.err.println("[PRECORDER] Could not write error log");
@@ -291,4 +278,5 @@ public final class PrecorderRecordingManager {
     public long getDroppedFrames() {
         return droppedFrames.get();
     }
-                        }
+            }
+                 
