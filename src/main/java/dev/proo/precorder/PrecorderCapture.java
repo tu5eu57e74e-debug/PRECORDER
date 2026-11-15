@@ -84,6 +84,17 @@ public final class PrecorderCapture {
             );
         }
 
+        // Verify that the framebuffer supports GPU readback.
+        int textureUsage = texture.usage();
+
+        if ((textureUsage & GpuTexture.USAGE_COPY_SRC) == 0) {
+            throw new IllegalStateException(
+                    "Framebuffer does not support GPU readback "
+                            + "(COPY_SRC missing, usage="
+                            + textureUsage + ")"
+            );
+        }
+
         int w = texture.getWidth(0);
         int h = texture.getHeight(0);
 
@@ -191,7 +202,6 @@ public final class PrecorderCapture {
 
                             source.get(pixels);
 
-                            // Diagnose the first captured frame.
                             if (diagnosticPrinted.compareAndSet(
                                     false,
                                     true
@@ -366,4 +376,4 @@ public final class PrecorderCapture {
             busy[i].set(false);
         }
     }
-                                    }
+                }
