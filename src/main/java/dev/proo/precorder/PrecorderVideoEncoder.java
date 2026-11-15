@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 public final class PrecorderVideoEncoder {
+
     private MP4Muxer muxer;
     private SeekableByteChannel channel;
     private MuxerTrack videoTrack;
@@ -37,7 +38,7 @@ public final class PrecorderVideoEncoder {
     public void start(File output, int width, int height, int fps)
             throws IOException {
 
-        if (muxer != null) {
+        if (isStarted()) {
             throw new IllegalStateException("Encoder already started");
         }
 
@@ -46,44 +47,80 @@ public final class PrecorderVideoEncoder {
         }
 
         if ((width & 1) != 0 || (height & 1) != 0) {
-            throw new IllegalArgumentException("Video dimensions must be even");
+            throw new IllegalArgumentException(
+                    "Video dimensions must be even"
+            );
+        }
+
+        long bufferSize = (long) width * height * 6L;
+
+        if (bufferSize > Integer.MAX_VALUE) {
+            throw new IOException("Video dimensions are too large");
         }
 
         File parent = output.getAbsoluteFile().getParentFile();
+
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
             throw new IOException("Could not create output directory");
         }
 
-        this.width = width;
-        this.height = height;
-        this.fps = fps;
-        this.frameNumber = 0L;
+        SeekableByteChannel openedChannel =
+                NIOUtils.writableChannel(output);
 
-        SeekableByteChannel openedChannel = NIOUtils.writableChannel(output);
         try {
             MP4Muxer openedMuxer =
                     MP4Muxer.createMP4MuxerToChannel(openedChannel);
-            H264Encoder openedEncoder = H264Encoder.createH264Encoder();
+
+            H264Encoder openedEncoder =
+                    H264Encoder.createH264Encoder();
 
             ColorSpace encoderColor =
                     openedEncoder.getSupportedColorSpaces()[0];
 
+            Transform transform =
+                    ColorUtil.getTransform(
+                            ColorSpace.RGB,
+                            encoderColor
+                    );
+
+            Picture rgb =
+                    Picture.create(width, height, ColorSpace.RGB);
+
+            Picture yuv =
+                    Picture.create(width, height, encoderColor);
+
+            ByteBuffer encodedBuffer =
+                    ByteBuffer.allocate((int) bufferSize);
+
+            MuxerTrack track =
+                    openedMuxer.addVideoTrack(Codec.H264, null);
+
+            this.width = width;
+            this.height = height;
+            this.fps = fps;
+            this.frameNumber = 0L;
+
             this.channel = openedChannel;
             this.muxer = openedMuxer;
             this.h264Encoder = openedEncoder;
-            this.rgbToYuv =
-                    ColorUtil.getTransform(ColorSpace.RGB, encoderColor);
-            this.rgbPicture =
-                    Picture.create(width, height, ColorSpace.RGB);
-            this.yuvPicture =
-                    Picture.create(width, height, encoderColor);
-            this.outputBuffer = ByteBuffer.allocate(width * height * 6);
-            this.videoTrack =
-                    openedMuxer.addVideoTrack(Codec.H264, null);
+            this.rgbToYuv = transform;
+            this.rgbPicture = rgb;
+            this.yuvPicture = yuv;
+            this.outputBuffer = encodedBuffer;
+            this.videoTrack = track;
 
-        } catch (RuntimeException | IOException error) {
+        } catch (Throwable error) {
             NIOUtils.closeQuietly(openedChannel);
-            throw error;
+
+            if (error instanceof IOException io) {
+                throw io;
+            }
+
+            if (error instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+
+            throw new IOException("Could not initialize video encoder", error);
         }
     }
 
@@ -102,11 +139,13 @@ public final class PrecorderVideoEncoder {
     }
 
     public void addFrame(byte[] rgba) throws IOException {
-        if (muxer == null || h264Encoder == null) {
+
+        if (!isStarted()) {
             throw new IllegalStateException("Encoder not started");
         }
 
-        if (rgba == null || rgba.length != (long) width * height * 4L) {
+        if (rgba == null
+                || rgba.length != (long) width * height * 4L) {
             throw new IllegalArgumentException("Invalid RGBA frame");
         }
 
@@ -128,6 +167,7 @@ public final class PrecorderVideoEncoder {
         rgbToYuv.transform(rgbPicture, yuvPicture);
 
         outputBuffer.clear();
+
         EncodedFrame encoded =
                 h264Encoder.encodeFrame(yuvPicture, outputBuffer);
 
@@ -137,7 +177,9 @@ public final class PrecorderVideoEncoder {
                 fps,
                 1,
                 frameNumber,
-                encoded.isKeyFrame() ? FrameType.KEY : FrameType.INTER,
+                encoded.isKeyFrame()
+                        ? FrameType.KEY
+                        : FrameType.INTER,
                 null
         );
 
@@ -146,7 +188,8 @@ public final class PrecorderVideoEncoder {
     }
 
     public void stop() throws IOException {
-        if (muxer == null) {
+
+        if (!isStarted()) {
             return;
         }
 
@@ -172,4 +215,4 @@ public final class PrecorderVideoEncoder {
     public boolean isStarted() {
         return muxer != null;
     }
-            }
+        }
