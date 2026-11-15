@@ -2,12 +2,12 @@
 
 <h1 align="center">PRECORDER</h1><h3 align="center">🎬 Professional In-Game Recording for Minecraft</h3><p align="center">
   <strong>Record • Customize • Capture • Replay</strong>
-</p><p align="center">
-  ![Fabric](https://img.shields.io/badge/Fabric-Mod-orange?style=for-the-badge)
-  ![Minecraft](https://img.shields.io/badge/Minecraft-1.21.11-green?style=for-the-badge)
-  ![Java](https://img.shields.io/badge/Java-21-red?style=for-the-badge)
-  ![FFmpeg](https://img.shields.io/badge/Encoder-FFmpeg-blue?style=for-the-badge)
-</p>---
+<p align="center">
+  <img src="https://img.shields.io/badge/Minecraft-1.21.11-green?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Fabric-Mod-orange?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Java-21-red?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/FFmpeg-Encoder-blue?style=for-the-badge" />
+</p>
 
 ✨ ABOUT
 
