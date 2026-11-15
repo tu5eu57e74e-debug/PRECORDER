@@ -63,21 +63,18 @@ public final class PrecorderVideoEncoder {
         }
 
         Picture picture = Picture.create(width, height, ColorSpace.RGB);
-
-        byte[] red = picture.getPlaneData(0);
-        byte[] green = picture.getPlaneData(1);
-        byte[] blue = picture.getPlaneData(2);
+        byte[] rgb = picture.getPlaneData(0);
 
         for (int y = 0; y < height; y++) {
             int sourceY = height - 1 - y;
 
             for (int x = 0; x < width; x++) {
                 int src = (sourceY * width + x) * 4;
-                int dst = y * width + x;
+                int dst = (y * width + x) * 3;
 
-                red[dst] = (byte) ((rgba[src] & 255) - 128);
-                green[dst] = (byte) ((rgba[src + 1] & 255) - 128);
-                blue[dst] = (byte) ((rgba[src + 2] & 255) - 128);
+                rgb[dst] = (byte) ((rgba[src] & 255) - 128);
+                rgb[dst + 1] = (byte) ((rgba[src + 1] & 255) - 128);
+                rgb[dst + 2] = (byte) ((rgba[src + 2] & 255) - 128);
             }
         }
 
@@ -97,4 +94,4 @@ public final class PrecorderVideoEncoder {
     public boolean isStarted() {
         return encoder != null;
     }
-}
+    }
