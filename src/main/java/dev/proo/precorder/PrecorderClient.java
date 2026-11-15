@@ -16,6 +16,63 @@ public final class PrecorderClient implements ClientModInitializer {
 
     private static String lastErrorShown;
 
+    private static void checkAndroidEncoder() {
+        try {
+            Class<?> listClass =
+                    Class.forName("android.media.MediaCodecList");
+
+            Class<?> infoClass =
+                    Class.forName("android.media.MediaCodecInfo");
+
+            Object list = listClass
+                    .getConstructor(int.class)
+                    .newInstance(1);
+
+            Object infos = listClass
+                    .getMethod("getCodecInfos")
+                    .invoke(list);
+
+            int count = java.lang.reflect.Array.getLength(infos);
+            boolean avcEncoderFound = false;
+
+            for (int i = 0; i < count; i++) {
+                Object info =
+                        java.lang.reflect.Array.get(infos, i);
+
+                boolean isEncoder = (boolean) infoClass
+                        .getMethod("isEncoder")
+                        .invoke(info);
+
+                if (!isEncoder) continue;
+
+                String[] types = (String[]) infoClass
+                        .getMethod("getSupportedTypes")
+                        .invoke(info);
+
+                for (String type : types) {
+                    if ("video/avc".equalsIgnoreCase(type)) {
+                        avcEncoderFound = true;
+                        break;
+                    }
+                }
+
+                if (avcEncoderFound) break;
+            }
+
+            System.out.println(
+                    "[PRECORDER] MediaCodec available. AVC encoder: "
+                            + avcEncoderFound
+            );
+
+        } catch (Throwable error) {
+            System.out.println(
+                    "[PRECORDER] MediaCodec unavailable: "
+                            + error.getClass().getName()
+                            + ": " + error.getMessage()
+            );
+        }
+    }
+
     public static boolean toggleRecording() {
         MinecraftClient client = MinecraftClient.getInstance();
 
@@ -35,10 +92,7 @@ public final class PrecorderClient implements ClientModInitializer {
             return true;
 
         } catch (Exception exception) {
-            message(
-                    client,
-                    "Could not start: " + exception.getMessage()
-            );
+            message(client, "Could not start: " + exception.getMessage());
             return false;
         }
     }
@@ -66,10 +120,11 @@ public final class PrecorderClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        checkAndroidEncoder();
+
         PrecorderKeybinds.register();
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-
             while (PrecorderKeybinds.openMenu.wasPressed()) {
                 client.setScreen(
                         new PrecorderScreen(client.currentScreen)
@@ -106,7 +161,6 @@ public final class PrecorderClient implements ClientModInitializer {
                 VanillaHudElements.SUBTITLES,
                 Identifier.of("precorder", "capture"),
                 (drawContext, tickCounter) -> {
-
                     MinecraftClient client =
                             MinecraftClient.getInstance();
 
@@ -120,14 +174,12 @@ public final class PrecorderClient implements ClientModInitializer {
                                 client,
                                 RECORDER::submit
                         );
-
                     } catch (Throwable error) {
                         String details =
                                 error.getClass().getSimpleName()
                                         + ": " + error.getMessage();
 
                         showCaptureError(client, details);
-
                         RECORDER.stop();
                         PrecorderState.stop();
                     }
@@ -144,7 +196,6 @@ public final class PrecorderClient implements ClientModInitializer {
         }
 
         lastErrorShown = error;
-
         message(client, "Recording error: " + error);
     }
 
@@ -159,4 +210,4 @@ public final class PrecorderClient implements ClientModInitializer {
             );
         }
     }
-}
+                                                  }
