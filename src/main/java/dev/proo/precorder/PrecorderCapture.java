@@ -2,7 +2,6 @@
 package dev.proo.precorder;
 
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.util.Window;
 
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL15;
@@ -16,10 +15,14 @@ import java.util.function.Consumer;
 public final class PrecorderCapture {
     private PrecorderCapture() {}
 
-    public record CapturedFrame(int width, int height, byte[] rgba) {}
+    public record CapturedFrame(
+            int width,
+            int height,
+            byte[] rgba,
+            long timestampNanos
+    ) {}
 
     private static final int BUFFER_COUNT = 2;
-
     private static final int[] pbo = new int[BUFFER_COUNT];
 
     private static int width = -1;
@@ -28,6 +31,8 @@ public final class PrecorderCapture {
 
     private static boolean pboSupported = true;
     private static boolean hasPendingFrame = false;
+
+    private static long pendingTimestampNanos;
 
     private static volatile String lastError;
 
@@ -39,8 +44,6 @@ public final class PrecorderCapture {
         lastError = null;
     }
 
-    // PBO readback is mapped synchronously on the render thread.
-    // There are no outstanding Java-side callbacks for the worker to wait for.
     public static int getPendingCaptures() {
         return 0;
     }
@@ -52,6 +55,8 @@ public final class PrecorderCapture {
         if (client == null || onCaptured == null) {
             throw new IllegalArgumentException("Missing capture arguments");
         }
+
+        long captureTimestampNanos = System.nanoTime();
 
         int frameWidth = client.getWindow().getFramebufferWidth();
         int frameHeight = client.getWindow().getFramebufferHeight();
@@ -78,6 +83,7 @@ public final class PrecorderCapture {
             height = frameHeight;
             writeIndex = 0;
             hasPendingFrame = false;
+            pendingTimestampNanos = 0;
         }
 
         if (pboSupported) {
@@ -86,6 +92,7 @@ public final class PrecorderCapture {
                         frameWidth,
                         frameHeight,
                         byteCount,
+                        captureTimestampNanos,
                         onCaptured
                 );
                 return;
@@ -100,6 +107,7 @@ public final class PrecorderCapture {
                 pboSupported = false;
                 deletePbos();
                 hasPendingFrame = false;
+                pendingTimestampNanos = 0;
             }
         }
 
@@ -107,6 +115,7 @@ public final class PrecorderCapture {
                 frameWidth,
                 frameHeight,
                 byteCount,
+                captureTimestampNanos,
                 onCaptured
         );
     }
@@ -115,6 +124,7 @@ public final class PrecorderCapture {
             int frameWidth,
             int frameHeight,
             int byteCount,
+            long captureTimestampNanos,
             Consumer<CapturedFrame> onCaptured
     ) {
         int oldReadFramebuffer =
@@ -138,7 +148,6 @@ public final class PrecorderCapture {
 
             ensurePbos(byteCount);
 
-            // Map the previous frame while the next frame is being submitted.
             if (hasPendingFrame) {
                 int readIndex = (writeIndex + 1) % BUFFER_COUNT;
 
@@ -174,11 +183,15 @@ public final class PrecorderCapture {
                 }
 
                 onCaptured.accept(
-                        new CapturedFrame(frameWidth, frameHeight, pixels)
+                        new CapturedFrame(
+                                frameWidth,
+                                frameHeight,
+                                pixels,
+                                pendingTimestampNanos
+                        )
                 );
             }
 
-            // Submit the current frame into the other PBO.
             GL15.glBindBuffer(
                     GL21.GL_PIXEL_PACK_BUFFER,
                     pbo[writeIndex]
@@ -204,6 +217,7 @@ public final class PrecorderCapture {
             }
 
             hasPendingFrame = true;
+            pendingTimestampNanos = captureTimestampNanos;
             writeIndex = (writeIndex + 1) % BUFFER_COUNT;
             lastError = null;
 
@@ -218,12 +232,12 @@ public final class PrecorderCapture {
                     oldPackAlignment
             );
 
-            GL11.glReadBuffer(oldReadBuffer);
-
             GL30.glBindFramebuffer(
                     GL30.GL_READ_FRAMEBUFFER,
                     oldReadFramebuffer
             );
+
+            GL11.glReadBuffer(oldReadBuffer);
         }
     }
 
@@ -260,6 +274,7 @@ public final class PrecorderCapture {
             int frameWidth,
             int frameHeight,
             int byteCount,
+            long captureTimestampNanos,
             Consumer<CapturedFrame> onCaptured
     ) {
         int oldReadFramebuffer =
@@ -308,7 +323,12 @@ public final class PrecorderCapture {
             pixels.get(rgba);
 
             onCaptured.accept(
-                    new CapturedFrame(frameWidth, frameHeight, rgba)
+                    new CapturedFrame(
+                            frameWidth,
+                            frameHeight,
+                            rgba,
+                            captureTimestampNanos
+                    )
             );
 
             lastError = null;
@@ -336,12 +356,12 @@ public final class PrecorderCapture {
                     oldPackAlignment
             );
 
-            GL11.glReadBuffer(oldReadBuffer);
-
             GL30.glBindFramebuffer(
                     GL30.GL_READ_FRAMEBUFFER,
                     oldReadFramebuffer
             );
+
+            GL11.glReadBuffer(oldReadBuffer);
         }
     }
 
@@ -351,7 +371,7 @@ public final class PrecorderCapture {
                 try {
                     GL15.glDeleteBuffers(pbo[i]);
                 } catch (Throwable ignored) {
-                    // The GL context may not be available during shutdown.
+                    // GL context may be unavailable during shutdown.
                 }
 
                 pbo[i] = 0;
@@ -366,5 +386,4 @@ public final class PrecorderCapture {
             }
         }
     }
-                    }
-                
+}
