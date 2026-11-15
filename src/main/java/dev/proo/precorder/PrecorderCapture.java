@@ -14,20 +14,38 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 public final class PrecorderCapture {
+
     private PrecorderCapture() {}
 
-    public record CapturedFrame(int width, int height, byte[] rgba) {}
+    public record CapturedFrame(
+            int width,
+            int height,
+            byte[] rgba
+    ) {}
 
     private static final int BUFFER_COUNT = 2;
-    private static final GpuBuffer[] buffers = new GpuBuffer[BUFFER_COUNT];
+
+    private static final GpuBuffer[] buffers =
+            new GpuBuffer[BUFFER_COUNT];
+
     private static final AtomicBoolean[] busy = {
             new AtomicBoolean(false),
             new AtomicBoolean(false)
     };
 
+    private static volatile String lastError;
+
     private static int width = -1;
     private static int height = -1;
     private static int nextSlot;
+
+    public static String getLastError() {
+        return lastError;
+    }
+
+    public static void clearError() {
+        lastError = null;
+    }
 
     public static void captureFrame(
             MinecraftClient client,
@@ -36,27 +54,35 @@ public final class PrecorderCapture {
         RenderSystem.assertOnRenderThread();
 
         if (client == null || onCaptured == null) {
-            throw new IllegalArgumentException("Missing capture arguments");
+            throw new IllegalArgumentException(
+                    "Missing capture arguments"
+            );
         }
 
         Framebuffer framebuffer = client.getFramebuffer();
         GpuTexture texture = framebuffer.getColorAttachment();
 
         if (texture == null) {
-            throw new IllegalStateException("Framebuffer texture is missing");
+            throw new IllegalStateException(
+                    "Framebuffer texture is missing"
+            );
         }
 
         int w = framebuffer.textureWidth;
         int h = framebuffer.textureHeight;
 
         if (w <= 0 || h <= 0) {
-            throw new IllegalStateException("Invalid frame dimensions");
+            throw new IllegalStateException(
+                    "Invalid frame dimensions"
+            );
         }
 
         long size = (long) w * h * 4L;
 
         if (size > Integer.MAX_VALUE) {
-            throw new IllegalStateException("Frame is too large");
+            throw new IllegalStateException(
+                    "Frame is too large"
+            );
         }
 
         if (w != width || h != height) {
@@ -73,7 +99,8 @@ public final class PrecorderCapture {
 
                 buffers[i] = RenderSystem.getDevice().createBuffer(
                         () -> "PRECORDER readback " + bufferIndex,
-                        GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ,
+                        GpuBuffer.USAGE_COPY_DST
+                                | GpuBuffer.USAGE_MAP_READ,
                         size
                 );
             }
@@ -86,7 +113,8 @@ public final class PrecorderCapture {
         int slot = -1;
 
         for (int i = 0; i < BUFFER_COUNT; i++) {
-            int candidate = (nextSlot + i) % BUFFER_COUNT;
+            int candidate =
+                    (nextSlot + i) % BUFFER_COUNT;
 
             if (!busy[candidate].get()) {
                 slot = candidate;
@@ -105,7 +133,8 @@ public final class PrecorderCapture {
 
         GpuBuffer buffer = buffers[selectedSlot];
 
-        if (!busy[selectedSlot].compareAndSet(false, true)) {
+        if (buffer == null
+                || !busy[selectedSlot].compareAndSet(false, true)) {
             return;
         }
 
@@ -119,7 +148,11 @@ public final class PrecorderCapture {
                     0L,
                     () -> {
                         try (MappedView mapped =
-                                     encoder.mapBuffer(buffer, true, false)) {
+                                     encoder.mapBuffer(
+                                             buffer,
+                                             true,
+                                             false
+                                     )) {
 
                             ByteBuffer source = mapped.data();
 
@@ -127,7 +160,8 @@ public final class PrecorderCapture {
                                 throw new IllegalStateException(
                                         "Incomplete GPU frame: "
                                                 + source.remaining()
-                                                + "/" + expectedSize
+                                                + "/"
+                                                + expectedSize
                                 );
                             }
 
@@ -142,11 +176,21 @@ public final class PrecorderCapture {
                                     )
                             );
 
+                            lastError = null;
+
                         } catch (Throwable error) {
+                            lastError =
+                                    error.getClass().getSimpleName()
+                                            + ": "
+                                            + error.getMessage();
+
                             System.err.println(
-                                    "[PRECORDER] Readback error:"
+                                    "[PRECORDER] GPU readback failed: "
+                                            + lastError
                             );
+
                             error.printStackTrace();
+
                         } finally {
                             busy[selectedSlot].set(false);
                         }
@@ -154,11 +198,21 @@ public final class PrecorderCapture {
                     0
             );
 
-            nextSlot = (selectedSlot + 1) % BUFFER_COUNT;
+            nextSlot =
+                    (selectedSlot + 1) % BUFFER_COUNT;
 
         } catch (Throwable error) {
             busy[selectedSlot].set(false);
-            throw new RuntimeException("GPU capture failed", error);
+
+            lastError =
+                    error.getClass().getSimpleName()
+                            + ": "
+                            + error.getMessage();
+
+            throw new RuntimeException(
+                    "GPU capture failed",
+                    error
+            );
         }
     }
 
