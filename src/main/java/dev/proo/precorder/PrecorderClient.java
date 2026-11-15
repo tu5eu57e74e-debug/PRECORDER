@@ -27,13 +27,18 @@ public final class PrecorderClient implements ClientModInitializer {
         }
 
         try {
+            PrecorderCapture.clearError();
             RECORDER.start(PrecorderConfig.load());
             PrecorderState.start();
             lastErrorShown = null;
             message(client, "Recording started");
             return true;
+
         } catch (Exception exception) {
-            message(client, "Could not start: " + exception.getMessage());
+            message(
+                    client,
+                    "Could not start: " + exception.getMessage()
+            );
             return false;
         }
     }
@@ -64,8 +69,11 @@ public final class PrecorderClient implements ClientModInitializer {
         PrecorderKeybinds.register();
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+
             while (PrecorderKeybinds.openMenu.wasPressed()) {
-                client.setScreen(new PrecorderScreen(client.currentScreen));
+                client.setScreen(
+                        new PrecorderScreen(client.currentScreen)
+                );
             }
 
             while (PrecorderKeybinds.toggleRecording.wasPressed()) {
@@ -76,12 +84,21 @@ public final class PrecorderClient implements ClientModInitializer {
                 togglePause();
             }
 
-            String error = RECORDER.getError();
+            String recorderError = RECORDER.getError();
 
-            if (error != null && !error.equals(lastErrorShown)) {
-                lastErrorShown = error;
+            if (recorderError != null) {
+                showCaptureError(client, recorderError);
+            }
+
+            String captureError = PrecorderCapture.getLastError();
+
+            if (captureError != null) {
+                showCaptureError(
+                        client,
+                        "Screen readback: " + captureError
+                );
+                RECORDER.stop();
                 PrecorderState.stop();
-                message(client, "Recording error: " + error);
             }
         });
 
@@ -89,6 +106,7 @@ public final class PrecorderClient implements ClientModInitializer {
                 VanillaHudElements.SUBTITLES,
                 Identifier.of("precorder", "capture"),
                 (drawContext, tickCounter) -> {
+
                     MinecraftClient client =
                             MinecraftClient.getInstance();
 
@@ -102,21 +120,32 @@ public final class PrecorderClient implements ClientModInitializer {
                                 client,
                                 RECORDER::submit
                         );
+
                     } catch (Throwable error) {
                         String details =
                                 error.getClass().getSimpleName()
                                         + ": " + error.getMessage();
 
-                        if (!details.equals(lastErrorShown)) {
-                            lastErrorShown = details;
-                            message(client, "Capture error: " + details);
-                        }
+                        showCaptureError(client, details);
 
                         RECORDER.stop();
                         PrecorderState.stop();
                     }
                 }
         );
+    }
+
+    private static void showCaptureError(
+            MinecraftClient client,
+            String error
+    ) {
+        if (error == null || error.equals(lastErrorShown)) {
+            return;
+        }
+
+        lastErrorShown = error;
+
+        message(client, "Recording error: " + error);
     }
 
     private static void message(
@@ -130,5 +159,4 @@ public final class PrecorderClient implements ClientModInitializer {
             );
         }
     }
-                        }
-        
+}
