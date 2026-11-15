@@ -52,10 +52,22 @@ public final class PrecorderClient implements ClientModInitializer {
     public static boolean toggleRecording() {
         MinecraftClient client = MinecraftClient.getInstance();
 
+        if (RECORDER.isSaving()) {
+            message(
+                    client,
+                    "Video is still saving! Please do not leave the world."
+            );
+            return false;
+        }
+
         if (RECORDER.isRecording()) {
             RECORDER.stop();
             PrecorderState.stop();
-            message(client, "Stopping recording...");
+
+            message(
+                    client,
+                    "Saving video... Please do not leave the world!"
+            );
             return true;
         }
 
@@ -121,6 +133,13 @@ public final class PrecorderClient implements ClientModInitializer {
 
             while (PrecorderKeybinds.pauseRecording.wasPressed()) {
                 togglePause();
+            }
+
+            if (RECORDER.consumeSaveComplete()) {
+                message(
+                        client,
+                        "Video saved successfully!"
+                );
             }
 
             String recorderError = RECORDER.getError();
