@@ -2,12 +2,9 @@
 package dev.proo.precorder;
 
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
+import net.fabricmc.fabric.api.client.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
 
 import org.bytedeco.ffmpeg.avcodec.AVCodec;
 import org.bytedeco.ffmpeg.global.avcodec;
@@ -24,26 +21,21 @@ public final class PrecorderClient implements ClientModInitializer {
         try {
             Loader.load(avcodec.class);
 
-            int codecId = avcodec.AV_CODEC_ID_H264;
-            AVCodec encoder = avcodec.avcodec_find_encoder(codecId);
+            AVCodec encoder =
+                    avcodec.avcodec_find_encoder(avcodec.AV_CODEC_ID_H264);
 
             if (encoder == null || encoder.isNull()) {
                 throw new IllegalStateException(
-                        "FFmpeg loaded, but H264 encoder is unavailable"
+                        "H264 encoder is unavailable"
                 );
             }
 
-            System.out.println(
-                    "[PRECORDER] FFmpeg native library loaded."
-            );
-
-            System.out.println(
-                    "[PRECORDER] H264 encoder is available."
-            );
+            System.out.println("[PRECORDER] FFmpeg loaded.");
+            System.out.println("[PRECORDER] H264 encoder available.");
 
         } catch (Throwable error) {
             System.err.println(
-                    "[PRECORDER] FFmpeg/H264 check failed: " + error
+                    "[PRECORDER] FFmpeg check failed: " + error
             );
             error.printStackTrace();
         }
@@ -53,21 +45,14 @@ public final class PrecorderClient implements ClientModInitializer {
         MinecraftClient client = MinecraftClient.getInstance();
 
         if (RECORDER.isSaving()) {
-            message(
-                    client,
-                    "Video is still saving! Please do not leave the world."
-            );
+            message(client, "Video is still saving!");
             return false;
         }
 
         if (RECORDER.isRecording()) {
             RECORDER.stop();
             PrecorderState.stop();
-
-            message(
-                    client,
-                    "Saving video... Please do not leave the world!"
-            );
+            message(client, "Saving video...");
             return true;
         }
 
@@ -78,7 +63,6 @@ public final class PrecorderClient implements ClientModInitializer {
             PrecorderState.start();
 
             lastErrorShown = null;
-
             message(client, "Recording started");
             return true;
 
@@ -100,7 +84,6 @@ public final class PrecorderClient implements ClientModInitializer {
         }
 
         boolean pause = !RECORDER.isPaused();
-
         RECORDER.setPaused(pause);
 
         if (pause) {
@@ -111,6 +94,31 @@ public final class PrecorderClient implements ClientModInitializer {
 
         message(client, pause ? "Paused" : "Recording");
         return true;
+    }
+
+    public static void captureFrame() {
+        MinecraftClient client = MinecraftClient.getInstance();
+
+        if (client.player == null || !RECORDER.shouldCapture()) {
+            return;
+        }
+
+        try {
+            PrecorderCapture.captureFrame(
+                    client,
+                    RECORDER::submit
+            );
+
+        } catch (Throwable error) {
+            String details =
+                    error.getClass().getSimpleName()
+                            + ": " + error.getMessage();
+
+            showCaptureError(client, details);
+
+            RECORDER.stop();
+            PrecorderState.stop();
+        }
     }
 
     @Override
@@ -136,10 +144,7 @@ public final class PrecorderClient implements ClientModInitializer {
             }
 
             if (RECORDER.consumeSaveComplete()) {
-                message(
-                        client,
-                        "Video saved successfully!"
-                );
+                message(client, "Video saved successfully!");
             }
 
             String recorderError = RECORDER.getError();
@@ -160,39 +165,6 @@ public final class PrecorderClient implements ClientModInitializer {
                 PrecorderState.stop();
             }
         });
-
-        HudElementRegistry.attachElementAfter(
-                VanillaHudElements.SUBTITLES,
-                Identifier.of("precorder", "capture"),
-                (drawContext, tickCounter) -> {
-
-                    MinecraftClient client =
-                            MinecraftClient.getInstance();
-
-                    if (client.player == null
-                            || !RECORDER.shouldCapture()) {
-                        return;
-                    }
-
-                    try {
-                        PrecorderCapture.captureFrame(
-                                client,
-                                RECORDER::submit
-                        );
-
-                    } catch (Throwable error) {
-
-                        String details =
-                                error.getClass().getSimpleName()
-                                        + ": " + error.getMessage();
-
-                        showCaptureError(client, details);
-
-                        RECORDER.stop();
-                        PrecorderState.stop();
-                    }
-                }
-        );
     }
 
     private static void showCaptureError(
