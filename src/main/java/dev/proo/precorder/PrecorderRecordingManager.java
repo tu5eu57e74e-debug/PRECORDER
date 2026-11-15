@@ -7,7 +7,11 @@ import net.fabricmc.loader.api.metadata.ModOrigin;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -23,13 +27,17 @@ public final class PrecorderRecordingManager {
     private volatile boolean paused;
     private volatile String error;
 
+    private volatile long capturedFrames;
+    private volatile long encodedFrames;
+    private volatile long droppedFrames;
+
     private int fps;
     private File output;
+    private File logFile;
     private Thread worker;
     private long lastCaptureTime;
 
     private File getRecordingsDirectory() throws IOException {
-
         ModContainer mod = FabricLoader.getInstance()
                 .getModContainer("precorder")
                 .orElseThrow(() ->
@@ -40,28 +48,23 @@ public final class PrecorderRecordingManager {
         }
 
         for (Path modPath : mod.getOrigin().getPaths()) {
-
             Path modsDirectory = modPath.getParent();
 
             if (modsDirectory == null
                     || modsDirectory.getFileName() == null
                     || !modsDirectory.getFileName()
-                            .toString().equalsIgnoreCase("mods")) {
+                    .toString().equalsIgnoreCase("mods")) {
                 continue;
             }
 
             Path versionDirectory = modsDirectory.getParent();
 
-            if (versionDirectory == null) {
-                continue;
+            if (versionDirectory != null) {
+                return versionDirectory.resolve("p-recordings").toFile();
             }
-
-            return versionDirectory.resolve("p-recordings").toFile();
         }
 
-        throw new IOException(
-                "Could not locate the active version's mods folder"
-        );
+        throw new IOException("Could not locate active version mods folder");
     }
 
     public synchronized void start(PrecorderConfig config)
@@ -77,22 +80,24 @@ public final class PrecorderRecordingManager {
 
         fps = Math.max(1, config.fps);
 
-        File recordingsDirectory = getRecordingsDirectory();
+        File directory = getRecordingsDirectory();
 
-        if (!recordingsDirectory.exists()
-                && !recordingsDirectory.mkdirs()) {
+        if (!directory.exists() && !directory.mkdirs()) {
             throw new IOException("Could not create p-recordings folder");
         }
 
-        output = new File(
-                recordingsDirectory,
-                "PRECORDER_" + System.currentTimeMillis() + ".mp4"
-        );
+        output = new File(directory,
+                "PRECORDER_" + System.currentTimeMillis() + ".mp4");
+
+        logFile = new File(directory, "precorder-error.log");
 
         frames.clear();
         stopRequested.set(false);
         paused = false;
         error = null;
+        capturedFrames = 0;
+        encodedFrames = 0;
+        droppedFrames = 0;
         lastCaptureTime = 0;
         active = true;
 
@@ -118,12 +123,15 @@ public final class PrecorderRecordingManager {
     }
 
     public void submit(PrecorderCapture.CapturedFrame frame) {
-        if (frame == null || !active || paused
-                || stopRequested.get()) {
+        if (frame == null || !active || paused || stopRequested.get()) {
             return;
         }
 
-        frames.offer(frame);
+        if (frames.offer(frame)) {
+            capturedFrames++;
+        } else {
+            droppedFrames++;
+        }
     }
 
     public void setPaused(boolean value) {
@@ -150,31 +158,56 @@ public final class PrecorderRecordingManager {
                 }
 
                 if (!encoder.isStarted()) {
-                    encoder.start(
-                            output,
-                            frame.width(),
-                            frame.height(),
-                            fps
-                    );
+                    encoder.start(output, frame.width(), frame.height(), fps);
                 }
 
                 encoder.addFrame(frame);
+                encodedFrames++;
             }
 
             if (encoder.isStarted()) {
                 encoder.stop();
+            } else if (capturedFrames == 0) {
+                throw new IOException("No frames were captured");
+            }
+
+            if (!output.exists() || output.length() == 0) {
+                throw new IOException("Encoder produced an empty MP4 file");
             }
 
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            error = "Encoder interrupted";
-        } catch (Exception exception) {
-            error = exception.toString();
+            saveError("Encoder interrupted", exception);
+        } catch (Throwable exception) {
+            saveError("Recording failed", exception);
         } finally {
             active = false;
             stopRequested.set(true);
             frames.clear();
         }
+    }
+
+    private void saveError(String message, Throwable exception) {
+        StringWriter writer = new StringWriter();
+        exception.printStackTrace(new PrintWriter(writer));
+
+        error = message + ": " + exception;
+
+        try {
+            Files.writeString(
+                    logFile.toPath(),
+                    "\n\n--- " + java.time.Instant.now() + " ---\n"
+                            + message + "\n" + writer,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND
+            );
+        } catch (IOException logError) {
+            System.err.println("[PRECORDER] Could not write error log");
+            logError.printStackTrace();
+        }
+
+        System.err.println("[PRECORDER] " + message);
+        exception.printStackTrace();
     }
 
     public boolean isRecording() {
@@ -188,4 +221,16 @@ public final class PrecorderRecordingManager {
     public String getError() {
         return error;
     }
-}
+
+    public long getCapturedFrames() {
+        return capturedFrames;
+    }
+
+    public long getEncodedFrames() {
+        return encodedFrames;
+    }
+
+    public long getDroppedFrames() {
+        return droppedFrames;
+    }
+    }
