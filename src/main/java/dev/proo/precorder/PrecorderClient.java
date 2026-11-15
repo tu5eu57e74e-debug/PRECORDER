@@ -9,6 +9,10 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 
+import org.bytedeco.ffmpeg.avcodec.AVCodec;
+import org.bytedeco.ffmpeg.global.avcodec;
+import org.bytedeco.javacpp.Loader;
+
 public final class PrecorderClient implements ClientModInitializer {
 
     private static final PrecorderRecordingManager RECORDER =
@@ -18,27 +22,29 @@ public final class PrecorderClient implements ClientModInitializer {
 
     private static void checkFFmpeg() {
         try {
-            org.bytedeco.javacpp.Loader.load(
-                    org.bytedeco.ffmpeg.global.avcodec.class
-            );
+            Loader.load(avcodec.class);
 
-            int codecId =
-                    org.bytedeco.ffmpeg.global.avcodec.AV_CODEC_ID_H264;
+            int codecId = avcodec.AV_CODEC_ID_H264;
+            AVCodec encoder = avcodec.avcodec_find_encoder(codecId);
+
+            if (encoder == null || encoder.isNull()) {
+                throw new IllegalStateException(
+                        "FFmpeg loaded, but H264 encoder is unavailable"
+                );
+            }
 
             System.out.println(
                     "[PRECORDER] FFmpeg native library loaded."
             );
 
             System.out.println(
-                    "[PRECORDER] H264 codec ID: " + codecId
+                    "[PRECORDER] H264 encoder is available."
             );
 
         } catch (Throwable error) {
             System.err.println(
-                    "[PRECORDER] FFmpeg native loading failed: "
-                            + error
+                    "[PRECORDER] FFmpeg/H264 check failed: " + error
             );
-
             error.printStackTrace();
         }
     }
@@ -123,8 +129,7 @@ public final class PrecorderClient implements ClientModInitializer {
                 showCaptureError(client, recorderError);
             }
 
-            String captureError =
-                    PrecorderCapture.getLastError();
+            String captureError = PrecorderCapture.getLastError();
 
             if (captureError != null) {
                 showCaptureError(
@@ -194,5 +199,4 @@ public final class PrecorderClient implements ClientModInitializer {
             );
         }
     }
-        }
-                            
+}
