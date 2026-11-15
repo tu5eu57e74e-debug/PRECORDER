@@ -10,13 +10,20 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.Framebuffer;
 
 import java.nio.ByteBuffer;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 public final class PrecorderCapture {
     private PrecorderCapture() {}
 
     public record CapturedFrame(int width, int height, byte[] rgba) {}
+
+    private static final int BUFFER_COUNT = 2;
+    private static final GpuBuffer[] buffers = new GpuBuffer[BUFFER_COUNT];
+    private static final boolean[] busy = new boolean[BUFFER_COUNT];
+
+    private static int width = -1;
+    private static int height = -1;
+    private static int nextSlot;
 
     public static void captureFrame(
             MinecraftClient client,
@@ -25,104 +32,131 @@ public final class PrecorderCapture {
         RenderSystem.assertOnRenderThread();
 
         if (client == null || onCaptured == null) {
-            throw new IllegalArgumentException(
-                    "Client and callback are required"
-            );
+            throw new IllegalArgumentException("Missing capture arguments");
         }
 
         Framebuffer framebuffer = client.getFramebuffer();
         GpuTexture texture = framebuffer.getColorAttachment();
 
         if (texture == null) {
-            throw new IllegalStateException(
-                    "Framebuffer color texture is missing"
-            );
+            throw new IllegalStateException("Framebuffer texture is missing");
         }
 
-        int width = framebuffer.textureWidth;
-        int height = framebuffer.textureHeight;
+        int w = framebuffer.textureWidth;
+        int h = framebuffer.textureHeight;
 
-        if (width <= 0 || height <= 0) {
-            throw new IllegalStateException(
-                    "Invalid framebuffer dimensions: "
-                            + width + "x" + height
-            );
+        if (w <= 0 || h <= 0) {
+            throw new IllegalStateException("Invalid frame dimensions");
         }
 
-        long expectedSize = (long) width * height * 4L;
-
-        GpuBuffer buffer = RenderSystem.getDevice().createBuffer(
-                () -> "PRECORDER frame readback",
-                GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ,
-                expectedSize
-        );
-
-        AtomicBoolean closed = new AtomicBoolean(false);
-
-        Runnable closeBuffer = () -> {
-            if (closed.compareAndSet(false, true)) {
-                buffer.close();
+        if (w != width || h != height) {
+            for (int i = 0; i < BUFFER_COUNT; i++) {
+                if (busy[i]) {
+                    return;
+                }
             }
-        };
+
+            releaseBuffers();
+
+            long size = (long) w * h * 4L;
+
+            for (int i = 0; i < BUFFER_COUNT; i++) {
+                buffers[i] = RenderSystem.getDevice().createBuffer(
+                        () -> "PRECORDER readback " + i,
+                        GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ,
+                        size
+                );
+            }
+
+            width = w;
+            height = h;
+            nextSlot = 0;
+        }
+
+        int slot = -1;
+
+        for (int i = 0; i < BUFFER_COUNT; i++) {
+            int candidate = (nextSlot + i) % BUFFER_COUNT;
+
+            if (!busy[candidate]) {
+                slot = candidate;
+                break;
+            }
+        }
+
+        if (slot == -1) {
+            return;
+        }
+
+        final int selectedSlot = slot;
+        final int frameWidth = w;
+        final int frameHeight = h;
+        final long expectedSize = (long) w * h * 4L;
+
+        GpuBuffer buffer = buffers[selectedSlot];
+        busy[selectedSlot] = true;
 
         try {
-            CommandEncoder copyEncoder =
+            CommandEncoder encoder =
                     RenderSystem.getDevice().createCommandEncoder();
 
-            copyEncoder.copyTextureToBuffer(
+            encoder.copyTextureToBuffer(
                     texture,
                     buffer,
                     0L,
                     () -> {
-                        try {
-                            CommandEncoder readEncoder =
-                                    RenderSystem.getDevice()
-                                            .createCommandEncoder();
+                        try (MappedView mapped =
+                                     encoder.mapBuffer(buffer, true, false)) {
 
-                            try (MappedView mapped =
-                                         readEncoder.mapBuffer(
-                                                 buffer, true, false
-                                         )) {
+                            ByteBuffer source = mapped.data();
 
-                                ByteBuffer data = mapped.data();
-
-                                if (data.remaining() < expectedSize) {
-                                    throw new IllegalStateException(
-                                            "GPU returned incomplete frame: "
-                                                    + data.remaining()
-                                                    + " / " + expectedSize
-                                    );
-                                }
-
-                                byte[] pixels =
-                                        new byte[(int) expectedSize];
-
-                                data.get(pixels);
-
-                                onCaptured.accept(
-                                        new CapturedFrame(
-                                                width, height, pixels
-                                        )
+                            if (source.remaining() < expectedSize) {
+                                throw new IllegalStateException(
+                                        "Incomplete GPU frame: "
+                                                + source.remaining()
+                                                + "/" + expectedSize
                                 );
                             }
+
+                            byte[] pixels = new byte[(int) expectedSize];
+                            source.get(pixels);
+
+                            onCaptured.accept(
+                                    new CapturedFrame(
+                                            frameWidth,
+                                            frameHeight,
+                                            pixels
+                                    )
+                            );
+
                         } catch (Throwable error) {
                             System.err.println(
-                                    "[PRECORDER] Frame readback failed:"
+                                    "[PRECORDER] Readback error:"
                             );
                             error.printStackTrace();
                         } finally {
-                            closeBuffer.run();
+                            busy[selectedSlot] = false;
                         }
                     },
                     0
             );
 
+            nextSlot = (selectedSlot + 1) % BUFFER_COUNT;
+
         } catch (Throwable error) {
-            closeBuffer.run();
-            throw new RuntimeException(
-                    "Could not copy framebuffer to readback buffer",
-                    error
-            );
+            busy[selectedSlot] = false;
+            throw new RuntimeException("GPU capture failed", error);
         }
     }
+
+    private static void releaseBuffers() {
+        for (int i = 0; i < BUFFER_COUNT; i++) {
+            if (buffers[i] != null) {
+                buffers[i].close();
+                buffers[i] = null;
             }
+
+            busy[i] = false;
+        }
+    }
+}
