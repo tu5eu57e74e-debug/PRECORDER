@@ -31,6 +31,8 @@ public final class PrecorderRecordingManager {
 
     private volatile boolean active;
     private volatile boolean paused;
+    private volatile boolean saving;
+    private volatile boolean saveComplete;
     private volatile String error;
 
     private int fps;
@@ -122,6 +124,8 @@ public final class PrecorderRecordingManager {
 
         stopRequested.set(false);
         paused = false;
+        saving = false;
+        saveComplete = false;
         error = null;
 
         capturedFrames.set(0);
@@ -205,6 +209,8 @@ public final class PrecorderRecordingManager {
         if (active) {
             active = false;
             paused = false;
+            saving = true;
+            saveComplete = false;
             stopRequested.set(true);
         }
     }
@@ -284,6 +290,13 @@ public final class PrecorderRecordingManager {
                 }
             }
 
+            saveComplete =
+                    error == null
+                    && output != null
+                    && output.exists()
+                    && output.length() > 0;
+
+            saving = false;
             active = false;
             stopRequested.set(true);
             frames.clear();
@@ -327,6 +340,19 @@ public final class PrecorderRecordingManager {
         return paused;
     }
 
+    public boolean isSaving() {
+        return saving;
+    }
+
+    public boolean consumeSaveComplete() {
+        if (!saveComplete) {
+            return false;
+        }
+
+        saveComplete = false;
+        return true;
+    }
+
     public String getError() {
         return error;
     }
@@ -342,5 +368,4 @@ public final class PrecorderRecordingManager {
     public long getDroppedFrames() {
         return droppedFrames.get();
     }
-                              }
-    
+            }
