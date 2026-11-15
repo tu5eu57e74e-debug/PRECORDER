@@ -10,6 +10,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.Framebuffer;
 
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 public final class PrecorderCapture {
@@ -19,7 +20,10 @@ public final class PrecorderCapture {
 
     private static final int BUFFER_COUNT = 2;
     private static final GpuBuffer[] buffers = new GpuBuffer[BUFFER_COUNT];
-    private static final boolean[] busy = new boolean[BUFFER_COUNT];
+    private static final AtomicBoolean[] busy = {
+            new AtomicBoolean(false),
+            new AtomicBoolean(false)
+    };
 
     private static int width = -1;
     private static int height = -1;
@@ -49,20 +53,26 @@ public final class PrecorderCapture {
             throw new IllegalStateException("Invalid frame dimensions");
         }
 
+        long size = (long) w * h * 4L;
+
+        if (size > Integer.MAX_VALUE) {
+            throw new IllegalStateException("Frame is too large");
+        }
+
         if (w != width || h != height) {
-            for (int i = 0; i < BUFFER_COUNT; i++) {
-                if (busy[i]) {
+            for (AtomicBoolean state : busy) {
+                if (state.get()) {
                     return;
                 }
             }
 
             releaseBuffers();
 
-            long size = (long) w * h * 4L;
-
             for (int i = 0; i < BUFFER_COUNT; i++) {
+                final int bufferIndex = i;
+
                 buffers[i] = RenderSystem.getDevice().createBuffer(
-                        () -> "PRECORDER readback " + i,
+                        () -> "PRECORDER readback " + bufferIndex,
                         GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ,
                         size
                 );
@@ -78,7 +88,7 @@ public final class PrecorderCapture {
         for (int i = 0; i < BUFFER_COUNT; i++) {
             int candidate = (nextSlot + i) % BUFFER_COUNT;
 
-            if (!busy[candidate]) {
+            if (!busy[candidate].get()) {
                 slot = candidate;
                 break;
             }
@@ -91,10 +101,13 @@ public final class PrecorderCapture {
         final int selectedSlot = slot;
         final int frameWidth = w;
         final int frameHeight = h;
-        final long expectedSize = (long) w * h * 4L;
+        final int expectedSize = (int) size;
 
         GpuBuffer buffer = buffers[selectedSlot];
-        busy[selectedSlot] = true;
+
+        if (!busy[selectedSlot].compareAndSet(false, true)) {
+            return;
+        }
 
         try {
             CommandEncoder encoder =
@@ -118,7 +131,7 @@ public final class PrecorderCapture {
                                 );
                             }
 
-                            byte[] pixels = new byte[(int) expectedSize];
+                            byte[] pixels = new byte[expectedSize];
                             source.get(pixels);
 
                             onCaptured.accept(
@@ -135,7 +148,7 @@ public final class PrecorderCapture {
                             );
                             error.printStackTrace();
                         } finally {
-                            busy[selectedSlot] = false;
+                            busy[selectedSlot].set(false);
                         }
                     },
                     0
@@ -144,7 +157,7 @@ public final class PrecorderCapture {
             nextSlot = (selectedSlot + 1) % BUFFER_COUNT;
 
         } catch (Throwable error) {
-            busy[selectedSlot] = false;
+            busy[selectedSlot].set(false);
             throw new RuntimeException("GPU capture failed", error);
         }
     }
@@ -156,7 +169,7 @@ public final class PrecorderCapture {
                 buffers[i] = null;
             }
 
-            busy[i] = false;
+            busy[i].set(false);
         }
     }
 }
