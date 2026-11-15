@@ -61,6 +61,7 @@ public final class PrecorderVideoEncoder {
         this.frameNumber = 0;
 
         FFmpegFrameRecorder newRecorder = null;
+        Frame newFrame = null;
 
         try {
             newRecorder = new FFmpegFrameRecorder(
@@ -77,12 +78,16 @@ public final class PrecorderVideoEncoder {
             newRecorder.setGopSize(fps * 2);
             newRecorder.setMaxBFrames(0);
 
-            Frame newFrame = new Frame(
+            newFrame = new Frame(
                     width,
                     height,
                     Frame.DEPTH_UBYTE,
                     3
             );
+
+            if (newFrame.imageStride < width * 3) {
+                throw new IOException("Invalid FFmpeg frame stride");
+            }
 
             newRecorder.start();
 
@@ -93,6 +98,13 @@ public final class PrecorderVideoEncoder {
             if (newRecorder != null) {
                 try {
                     newRecorder.release();
+                } catch (Throwable ignored) {
+                }
+            }
+
+            if (newFrame != null) {
+                try {
+                    newFrame.close();
                 } catch (Throwable ignored) {
                 }
             }
@@ -144,6 +156,14 @@ public final class PrecorderVideoEncoder {
         }
 
         ByteBuffer destination = (ByteBuffer) frame.image[0];
+
+        int rowBytes = width * 3;
+        int stride = frame.imageStride;
+
+        if (stride < rowBytes) {
+            throw new IOException("Invalid frame row stride");
+        }
+
         destination.clear();
 
         for (int y = 0; y < height; y++) {
@@ -151,6 +171,9 @@ public final class PrecorderVideoEncoder {
             int sourceY = (int) (
                     (long) (height - 1 - y) * sourceHeight / height
             );
+
+            int rowStart = y * stride;
+            destination.position(rowStart);
 
             for (int x = 0; x < width; x++) {
 
@@ -161,14 +184,20 @@ public final class PrecorderVideoEncoder {
                 int sourceIndex =
                         (sourceY * sourceWidth + sourceX) * 4;
 
-                // Convert RGBA to BGR for JavaCV.
+                // Convert RGBA to BGR.
                 destination.put(rgba[sourceIndex + 2]);
                 destination.put(rgba[sourceIndex + 1]);
                 destination.put(rgba[sourceIndex]);
             }
+
+            // Fill row-alignment padding.
+            while (destination.position() < rowStart + stride) {
+                destination.put((byte) 0);
+            }
         }
 
-        destination.flip();
+        destination.position(0);
+        destination.limit(height * stride);
 
         frame.timestamp = frameNumber * 1_000_000L / fps;
 
@@ -187,6 +216,7 @@ public final class PrecorderVideoEncoder {
     public void stop() throws IOException {
 
         FFmpegFrameRecorder current = recorder;
+        Frame currentFrame = frame;
 
         if (current == null) {
             return;
@@ -217,6 +247,21 @@ public final class PrecorderVideoEncoder {
                     failure.addSuppressed(error);
                 }
             }
+
+            if (currentFrame != null) {
+                try {
+                    currentFrame.close();
+                } catch (Exception error) {
+                    if (failure == null) {
+                        failure = new IOException(
+                                "Could not release frame memory",
+                                error
+                        );
+                    } else {
+                        failure.addSuppressed(error);
+                    }
+                }
+            }
         }
 
         if (failure != null) {
@@ -227,4 +272,5 @@ public final class PrecorderVideoEncoder {
     public boolean isStarted() {
         return recorder != null;
     }
-}
+    }
+                 
