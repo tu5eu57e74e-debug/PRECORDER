@@ -27,6 +27,7 @@ public final class PrecorderClient implements ClientModInitializer {
         try {
             RECORDER.start(PrecorderConfig.load());
             PrecorderState.start();
+            lastErrorShown = null;
             message(client, "Recording started");
             return true;
         } catch (Exception exception) {
@@ -61,7 +62,6 @@ public final class PrecorderClient implements ClientModInitializer {
         PrecorderKeybinds.register();
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-
             while (PrecorderKeybinds.openMenu.wasPressed()) {
                 client.setScreen(new PrecorderScreen(client.currentScreen));
             }
@@ -90,7 +90,20 @@ public final class PrecorderClient implements ClientModInitializer {
                 return;
             }
 
-            PrecorderCapture.captureFrame(client, RECORDER::submit);
+            try {
+                PrecorderCapture.captureFrame(client, RECORDER::submit);
+            } catch (Throwable error) {
+                String details = error.getClass().getSimpleName()
+                        + ": " + error.getMessage();
+
+                if (!details.equals(lastErrorShown)) {
+                    lastErrorShown = details;
+                    message(client, "Capture error: " + details);
+                }
+
+                RECORDER.stop();
+                PrecorderState.stop();
+            }
         });
     }
 
