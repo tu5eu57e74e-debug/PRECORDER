@@ -17,11 +17,14 @@ dependencies {
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
+    // JavaCV
+    include(implementation("org.bytedeco:javacv:1.5.14"))
+
     // JavaCPP
     include(implementation("org.bytedeco:javacpp:1.5.14"))
     include(implementation("org.bytedeco:javacpp:1.5.14:android-arm64"))
 
-    // FFmpeg - Android ARM64
+    // FFmpeg Android ARM64
     include(implementation("org.bytedeco:ffmpeg:8.1.2-1.5.14"))
     include(implementation("org.bytedeco:ffmpeg:8.1.2-1.5.14:android-arm64"))
 }
