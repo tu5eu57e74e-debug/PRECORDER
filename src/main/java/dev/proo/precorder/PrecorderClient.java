@@ -198,4 +198,3 @@ public final class PrecorderClient implements ClientModInitializer {
             );
         }
     }
-                }
