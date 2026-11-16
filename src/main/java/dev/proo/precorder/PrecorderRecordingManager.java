@@ -69,7 +69,9 @@ public final class PrecorderRecordingManager {
             Path versionDirectory = modsDirectory.getParent();
 
             if (versionDirectory != null) {
-                return versionDirectory.resolve("p-recordings").toFile();
+                return versionDirectory
+                        .resolve("p-recordings")
+                        .toFile();
             }
         }
 
@@ -85,7 +87,7 @@ public final class PrecorderRecordingManager {
             throw new IllegalArgumentException("Config is required");
         }
 
-        if (active || (worker != null && worker.isAlive())) {
+        if (active || saving || (worker != null && worker.isAlive())) {
             throw new IllegalStateException("Recorder is busy");
         }
 
@@ -95,7 +97,8 @@ public final class PrecorderRecordingManager {
         }
 
         resolution = config.resolution;
-        if (resolution != 480 && resolution != 720
+        if (resolution != 480
+                && resolution != 720
                 && resolution != 1080) {
             resolution = 1080;
         }
@@ -220,10 +223,7 @@ public final class PrecorderRecordingManager {
                 new PrecorderVideoEncoder();
 
         try {
-            while (!stopRequested.get()
-                    || !frames.isEmpty()
-                    || PrecorderCapture.getPendingCaptures() > 0) {
-
+            while (!stopRequested.get() || !frames.isEmpty()) {
                 PrecorderCapture.CapturedFrame frame =
                         frames.poll(100, TimeUnit.MILLISECONDS);
 
@@ -320,7 +320,6 @@ public final class PrecorderRecordingManager {
                     StandardOpenOption.CREATE,
                     StandardOpenOption.APPEND
             );
-
         } catch (IOException logError) {
             System.err.println(
                     "[PRECORDER] Could not write error log"
@@ -368,4 +367,4 @@ public final class PrecorderRecordingManager {
     public long getDroppedFrames() {
         return droppedFrames.get();
     }
-            }
+}
