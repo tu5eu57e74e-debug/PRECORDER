@@ -24,8 +24,12 @@ public final class PrecorderVideoEncoder {
     private long firstTimestampNanos = -1;
     private long lastTimestampMicros = -1;
 
-    public void start(File output, int width, int height, int fps)
-            throws IOException {
+    public void start(
+            File output,
+            int width,
+            int height,
+            int fps
+    ) throws IOException {
         start(output, width, height, fps, 12);
     }
 
@@ -62,9 +66,9 @@ public final class PrecorderVideoEncoder {
         this.fps = fps;
         this.bitrateMbps = Math.max(2, Math.min(50, bitrateMbps));
 
-        this.frameNumber = 0;
-        this.firstTimestampNanos = -1;
-        this.lastTimestampMicros = -1;
+        frameNumber = 0;
+        firstTimestampNanos = -1;
+        lastTimestampMicros = -1;
 
         FFmpegFrameRecorder newRecorder = null;
         Frame newFrame = null;
@@ -80,9 +84,15 @@ public final class PrecorderVideoEncoder {
             newRecorder.setVideoCodec(avcodec.AV_CODEC_ID_H264);
             newRecorder.setPixelFormat(avutil.AV_PIX_FMT_YUV420P);
             newRecorder.setFrameRate(fps);
-            newRecorder.setVideoBitrate(this.bitrateMbps * 1_000_000);
+            newRecorder.setVideoBitrate(
+                    this.bitrateMbps * 1_000_000
+            );
             newRecorder.setGopSize(fps * 2);
             newRecorder.setMaxBFrames(0);
+
+            // Reduce encoding latency and CPU cost.
+            newRecorder.setVideoOption("preset", "ultrafast");
+            newRecorder.setVideoOption("tune", "zerolatency");
 
             newFrame = new Frame(
                     width,
@@ -97,8 +107,8 @@ public final class PrecorderVideoEncoder {
 
             newRecorder.start();
 
-            this.recorder = newRecorder;
-            this.frame = newFrame;
+            recorder = newRecorder;
+            frame = newFrame;
 
         } catch (Throwable error) {
             if (newRecorder != null) {
@@ -126,8 +136,9 @@ public final class PrecorderVideoEncoder {
         }
     }
 
-    public void addFrame(PrecorderCapture.CapturedFrame captured)
-            throws IOException {
+    public void addFrame(
+            PrecorderCapture.CapturedFrame captured
+    ) throws IOException {
 
         if (captured == null) {
             throw new IllegalArgumentException("Frame is required");
@@ -167,7 +178,8 @@ public final class PrecorderVideoEncoder {
         if (rgba == null
                 || sourceWidth <= 0
                 || sourceHeight <= 0
-                || rgba.length != (long) sourceWidth * sourceHeight * 4L) {
+                || rgba.length != (long) sourceWidth
+                * sourceHeight * 4L) {
             throw new IllegalArgumentException("Invalid RGBA frame");
         }
 
@@ -187,7 +199,6 @@ public final class PrecorderVideoEncoder {
         destination.clear();
 
         for (int y = 0; y < height; y++) {
-
             int sourceY = (int) (
                     (long) (height - 1 - y) * sourceHeight / height
             );
@@ -196,7 +207,6 @@ public final class PrecorderVideoEncoder {
             destination.position(rowStart);
 
             for (int x = 0; x < width; x++) {
-
                 int sourceX = (int) (
                         (long) x * sourceWidth / width
                 );
@@ -204,7 +214,6 @@ public final class PrecorderVideoEncoder {
                 int sourceIndex =
                         (sourceY * sourceWidth + sourceX) * 4;
 
-                // Convert RGBA to BGR.
                 destination.put(rgba[sourceIndex + 2]);
                 destination.put(rgba[sourceIndex + 1]);
                 destination.put(rgba[sourceIndex]);
@@ -229,13 +238,12 @@ public final class PrecorderVideoEncoder {
 
         long timestampMicros = elapsedNanos / 1_000L;
 
-        // Keep timestamps strictly increasing.
         if (timestampMicros <= lastTimestampMicros) {
             timestampMicros = lastTimestampMicros + 1;
         }
 
         try {
-            // Apply the real capture timestamp to FFmpeg.
+            // Keep the real capture timestamp.
             recorder.setTimestamp(timestampMicros);
             recorder.record(frame);
 
@@ -251,7 +259,6 @@ public final class PrecorderVideoEncoder {
     }
 
     public void stop() throws IOException {
-
         FFmpegFrameRecorder current = recorder;
         Frame currentFrame = frame;
 
@@ -309,5 +316,4 @@ public final class PrecorderVideoEncoder {
     public boolean isStarted() {
         return recorder != null;
     }
-            }
-                
+}
