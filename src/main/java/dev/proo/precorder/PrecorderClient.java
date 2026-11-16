@@ -16,6 +16,7 @@ public final class PrecorderClient implements ClientModInitializer {
             new PrecorderRecordingManager();
 
     private static String lastErrorShown;
+    private static int activeResolution = 1080;
 
     private static void checkFFmpeg() {
         try {
@@ -60,15 +61,21 @@ public final class PrecorderClient implements ClientModInitializer {
         try {
             PrecorderCapture.clearError();
 
-            RECORDER.start(PrecorderConfig.load());
+            PrecorderConfig config = PrecorderConfig.load();
 
-            // Request a clean PBO session.
-            PrecorderCapture.beginRecordingSession();
+            activeResolution = config.resolution;
+
+            RECORDER.start(config);
+
+            PrecorderCapture.beginRecordingSession(
+                    activeResolution
+            );
 
             PrecorderState.start();
 
             lastErrorShown = null;
             message(client, "Recording started");
+
             return true;
 
         } catch (Exception exception) {
@@ -95,12 +102,18 @@ public final class PrecorderClient implements ClientModInitializer {
         if (pause) {
             PrecorderState.pause();
         } else {
-            // Reset delayed frames when recording resumes.
-            PrecorderCapture.beginRecordingSession();
+            PrecorderCapture.beginRecordingSession(
+                    activeResolution
+            );
+
             PrecorderState.resume();
         }
 
-        message(client, pause ? "Paused" : "Recording");
+        message(
+                client,
+                pause ? "Paused" : "Recording"
+        );
+
         return true;
     }
 
