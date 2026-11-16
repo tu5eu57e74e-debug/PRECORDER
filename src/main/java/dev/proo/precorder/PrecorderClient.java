@@ -50,7 +50,6 @@ public final class PrecorderClient implements ClientModInitializer {
         }
 
         if (RECORDER.isRecording()) {
-            PrecorderCapture.beginRecordingSession();
             RECORDER.stop();
             PrecorderState.stop();
 
@@ -63,7 +62,7 @@ public final class PrecorderClient implements ClientModInitializer {
 
             RECORDER.start(PrecorderConfig.load());
 
-            // Discard any delayed frame from the previous recording.
+            // Request a clean PBO session.
             PrecorderCapture.beginRecordingSession();
 
             PrecorderState.start();
@@ -91,12 +90,13 @@ public final class PrecorderClient implements ClientModInitializer {
 
         boolean pause = !RECORDER.isPaused();
 
-        PrecorderCapture.beginRecordingSession();
         RECORDER.setPaused(pause);
 
         if (pause) {
             PrecorderState.pause();
         } else {
+            // Reset delayed frames when recording resumes.
+            PrecorderCapture.beginRecordingSession();
             PrecorderState.resume();
         }
 
@@ -124,7 +124,6 @@ public final class PrecorderClient implements ClientModInitializer {
 
             showCaptureError(client, details);
 
-            PrecorderCapture.beginRecordingSession();
             RECORDER.stop();
             PrecorderState.stop();
         }
@@ -170,7 +169,6 @@ public final class PrecorderClient implements ClientModInitializer {
                         "Screen readback: " + captureError
                 );
 
-                PrecorderCapture.beginRecordingSession();
                 RECORDER.stop();
                 PrecorderState.stop();
             }
@@ -200,4 +198,4 @@ public final class PrecorderClient implements ClientModInitializer {
             );
         }
     }
-        }
+                }
