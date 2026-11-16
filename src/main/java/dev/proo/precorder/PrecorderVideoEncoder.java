@@ -90,18 +90,18 @@ public final class PrecorderVideoEncoder {
             newRecorder.setGopSize(fps * 2);
             newRecorder.setMaxBFrames(0);
 
-            // Reduce encoding latency and CPU cost.
             newRecorder.setVideoOption("preset", "ultrafast");
             newRecorder.setVideoOption("tune", "zerolatency");
 
+            // RGBA input: FFmpeg handles conversion to YUV420P.
             newFrame = new Frame(
                     width,
                     height,
                     Frame.DEPTH_UBYTE,
-                    3
+                    4
             );
 
-            if (newFrame.imageStride < width * 3) {
+            if (newFrame.imageStride < width * 4) {
                 throw new IOException("Invalid FFmpeg frame stride");
             }
 
@@ -189,7 +189,7 @@ public final class PrecorderVideoEncoder {
 
         ByteBuffer destination = (ByteBuffer) frame.image[0];
 
-        int rowBytes = width * 3;
+        int rowBytes = width * 4;
         int stride = frame.imageStride;
 
         if (stride < rowBytes) {
@@ -198,29 +198,51 @@ public final class PrecorderVideoEncoder {
 
         destination.clear();
 
-        for (int y = 0; y < height; y++) {
-            int sourceY = (int) (
-                    (long) (height - 1 - y) * sourceHeight / height
-            );
+        // Fast path: same dimensions, copy complete RGBA rows.
+        // Only vertical orientation needs to be corrected.
+        if (sourceWidth == width && sourceHeight == height) {
 
-            int rowStart = y * stride;
-            destination.position(rowStart);
+            for (int y = 0; y < height; y++) {
+                int sourceY = height - 1 - y;
+                int sourceOffset = sourceY * rowBytes;
+                int destinationOffset = y * stride;
 
-            for (int x = 0; x < width; x++) {
-                int sourceX = (int) (
-                        (long) x * sourceWidth / width
-                );
+                destination.position(destinationOffset);
+                destination.put(rgba, sourceOffset, rowBytes);
 
-                int sourceIndex =
-                        (sourceY * sourceWidth + sourceX) * 4;
-
-                destination.put(rgba[sourceIndex + 2]);
-                destination.put(rgba[sourceIndex + 1]);
-                destination.put(rgba[sourceIndex]);
+                while (destination.position() < destinationOffset + stride) {
+                    destination.put((byte) 0);
+                }
             }
 
-            while (destination.position() < rowStart + stride) {
-                destination.put((byte) 0);
+        } else {
+
+            // Fallback for frames whose dimensions differ.
+            for (int y = 0; y < height; y++) {
+                int sourceY = (int) (
+                        (long) (height - 1 - y) * sourceHeight / height
+                );
+
+                int rowStart = y * stride;
+                destination.position(rowStart);
+
+                for (int x = 0; x < width; x++) {
+                    int sourceX = (int) (
+                            (long) x * sourceWidth / width
+                    );
+
+                    int sourceIndex =
+                            (sourceY * sourceWidth + sourceX) * 4;
+
+                    destination.put(rgba[sourceIndex]);
+                    destination.put(rgba[sourceIndex + 1]);
+                    destination.put(rgba[sourceIndex + 2]);
+                    destination.put(rgba[sourceIndex + 3]);
+                }
+
+                while (destination.position() < rowStart + stride) {
+                    destination.put((byte) 0);
+                }
             }
         }
 
@@ -243,7 +265,6 @@ public final class PrecorderVideoEncoder {
         }
 
         try {
-            // Keep the real capture timestamp.
             recorder.setTimestamp(timestampMicros);
             recorder.record(frame);
 
@@ -316,4 +337,5 @@ public final class PrecorderVideoEncoder {
     public boolean isStarted() {
         return recorder != null;
     }
-}
+                }
+                    
