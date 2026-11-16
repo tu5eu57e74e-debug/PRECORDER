@@ -3,6 +3,7 @@ package dev.proo.precorder;
 
 import net.minecraft.client.MinecraftClient;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL12;
 import org.lwjgl.opengl.GL15;
 import org.lwjgl.opengl.GL21;
 import org.lwjgl.opengl.GL30;
@@ -182,12 +183,12 @@ public final class PrecorderCapture {
             GL11.glTexParameteri(
                     GL11.GL_TEXTURE_2D,
                     GL11.GL_TEXTURE_WRAP_S,
-                    GL12Compat.CLAMP_TO_EDGE
+                    GL12.GL_CLAMP_TO_EDGE
             );
             GL11.glTexParameteri(
                     GL11.GL_TEXTURE_2D,
                     GL11.GL_TEXTURE_WRAP_T,
-                    GL12Compat.CLAMP_TO_EDGE
+                    GL12.GL_CLAMP_TO_EDGE
             );
 
             GL11.glTexImage2D(
@@ -474,4 +475,4 @@ public final class PrecorderCapture {
             scaleTexture = 0;
         }
     }
-    }
+}
