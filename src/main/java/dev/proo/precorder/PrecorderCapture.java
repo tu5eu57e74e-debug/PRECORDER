@@ -9,6 +9,7 @@ import org.lwjgl.opengl.GL30;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 public final class PrecorderCapture {
@@ -34,6 +35,9 @@ public final class PrecorderCapture {
     private static long pendingTimestampNanos;
     private static volatile String lastError;
 
+    private static final AtomicBoolean sessionResetRequested =
+            new AtomicBoolean(false);
+
     public static String getLastError() {
         return lastError;
     }
@@ -42,8 +46,20 @@ public final class PrecorderCapture {
         lastError = null;
     }
 
-    // Discard the previous session's delayed PBO frame.
+    // Request a reset. OpenGL operations happen later on the render thread.
     public static void beginRecordingSession() {
+        sessionResetRequested.set(true);
+    }
+
+    private static void resetForNewSession() {
+        if (!sessionResetRequested.compareAndSet(true, false)) {
+            return;
+        }
+
+        // Delete the actual GPU buffers to discard old session data.
+        deletePbos();
+
+        writeIndex = 0;
         hasPendingFrame = false;
         pendingTimestampNanos = 0L;
     }
@@ -59,6 +75,9 @@ public final class PrecorderCapture {
         if (client == null || onCaptured == null) {
             throw new IllegalArgumentException("Missing capture arguments");
         }
+
+        // captureFrame runs while Minecraft's render context is current.
+        resetForNewSession();
 
         long captureTimestampNanos = System.nanoTime();
 
@@ -391,5 +410,4 @@ public final class PrecorderCapture {
             }
         }
     }
-                }
-    
+            }
