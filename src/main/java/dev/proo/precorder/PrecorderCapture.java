@@ -410,4 +410,3 @@ public final class PrecorderCapture {
             }
         }
     }
-            }
