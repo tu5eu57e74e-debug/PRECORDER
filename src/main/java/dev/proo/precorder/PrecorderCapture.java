@@ -2,7 +2,6 @@
 package dev.proo.precorder;
 
 import net.minecraft.client.MinecraftClient;
-
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL15;
 import org.lwjgl.opengl.GL21;
@@ -30,10 +29,9 @@ public final class PrecorderCapture {
     private static int writeIndex = 0;
 
     private static boolean pboSupported = true;
-    private static boolean hasPendingFrame = false;
+    private static volatile boolean hasPendingFrame = false;
 
     private static long pendingTimestampNanos;
-
     private static volatile String lastError;
 
     public static String getLastError() {
@@ -42,6 +40,12 @@ public final class PrecorderCapture {
 
     public static void clearError() {
         lastError = null;
+    }
+
+    // Discard the previous session's delayed PBO frame.
+    public static void beginRecordingSession() {
+        hasPendingFrame = false;
+        pendingTimestampNanos = 0L;
     }
 
     public static int getPendingCaptures() {
@@ -83,7 +87,7 @@ public final class PrecorderCapture {
             height = frameHeight;
             writeIndex = 0;
             hasPendingFrame = false;
-            pendingTimestampNanos = 0;
+            pendingTimestampNanos = 0L;
         }
 
         if (pboSupported) {
@@ -107,7 +111,7 @@ public final class PrecorderCapture {
                 pboSupported = false;
                 deletePbos();
                 hasPendingFrame = false;
-                pendingTimestampNanos = 0;
+                pendingTimestampNanos = 0L;
             }
         }
 
@@ -175,7 +179,9 @@ public final class PrecorderCapture {
                     mapped.position(0);
                     mapped.get(pixels);
                 } finally {
-                    if (!GL15.glUnmapBuffer(GL21.GL_PIXEL_PACK_BUFFER)) {
+                    if (!GL15.glUnmapBuffer(
+                            GL21.GL_PIXEL_PACK_BUFFER
+                    )) {
                         throw new IllegalStateException(
                                 "PBO data became invalid while unmapping"
                         );
@@ -371,7 +377,6 @@ public final class PrecorderCapture {
                 try {
                     GL15.glDeleteBuffers(pbo[i]);
                 } catch (Throwable ignored) {
-                    // GL context may be unavailable during shutdown.
                 }
 
                 pbo[i] = 0;
@@ -386,4 +391,5 @@ public final class PrecorderCapture {
             }
         }
     }
-}
+                }
+    
