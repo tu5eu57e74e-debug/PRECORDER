@@ -234,9 +234,9 @@ public final class PrecorderVideoEncoder {
             timestampMicros = lastTimestampMicros + 1;
         }
 
-        frame.timestamp = timestampMicros;
-
         try {
+            // Apply the real capture timestamp to FFmpeg.
+            recorder.setTimestamp(timestampMicros);
             recorder.record(frame);
 
             lastTimestampMicros = timestampMicros;
@@ -309,5 +309,5 @@ public final class PrecorderVideoEncoder {
     public boolean isStarted() {
         return recorder != null;
     }
-                }
-    
+            }
+                
